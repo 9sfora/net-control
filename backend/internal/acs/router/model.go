@@ -20,28 +20,32 @@ type Unknown struct {
 }
 
 type Router struct {
-	ID              string     `json:"id"`
-	Name            string     `json:"name"`
-	Manufacturer    string     `json:"manufacturer"`
-	OUI             string     `json:"oui"`
-	ProductClass    string     `json:"product_class"`
-	SerialNumber    string     `json:"serial_number"`
-	SoftwareVersion *string    `json:"software_version"`
-	HardwareVersion *string    `json:"hardware_version"`
-	DesiredStatus   string     `json:"desired_status"`
-	ReportedStatus  string     `json:"reported_status"`
-	FirstSeenAt     *time.Time `json:"first_seen_at"`
-	LastSeenAt      *time.Time `json:"last_seen_at"`
-	CreatedAt       time.Time  `json:"created_at"`
+	ID                string     `json:"id"`
+	Name              string     `json:"name"`
+	Manufacturer      string     `json:"manufacturer"`
+	OUI               string     `json:"oui"`
+	ProductClass      string     `json:"product_class"`
+	SerialNumber      string     `json:"serial_number"`
+	SoftwareVersion   *string    `json:"software_version"`
+	HardwareVersion   *string    `json:"hardware_version"`
+	RouterModelID     *string    `json:"router_model_id"`
+	HardwareVersionID *string    `json:"hardware_version_id"`
+	DesiredStatus     string     `json:"desired_status"`
+	ReportedStatus    string     `json:"reported_status"`
+	FirstSeenAt       *time.Time `json:"first_seen_at"`
+	LastSeenAt        *time.Time `json:"last_seen_at"`
+	CreatedAt         time.Time  `json:"created_at"`
 }
 
 type Summary struct {
 	Router
-	ConnectivityStatus   string     `json:"connectivity_status"`
-	LastInformAt         *time.Time `json:"last_inform_at"`
-	LastIPAddress        *string    `json:"last_ip_address"`
-	ConfigurationVersion int64      `json:"configuration_version"`
-	UpdatedAt            time.Time  `json:"updated_at"`
+	ConnectivityStatus     string     `json:"connectivity_status"`
+	LastInformAt           *time.Time `json:"last_inform_at"`
+	LastIPAddress          *string    `json:"last_ip_address"`
+	ConfigurationVersion   int64      `json:"configuration_version"`
+	UpdatedAt              time.Time  `json:"updated_at"`
+	RouterModelName        *string    `json:"router_model_name"`
+	CatalogHardwareVersion *string    `json:"catalog_hardware_version"`
 }
 
 type Session struct {
@@ -90,4 +94,10 @@ type ListFilter struct {
 	OfflineCutoff      time.Time
 	Limit              int
 	Offset             int
+}
+
+type ConfigureUnknownInput struct {
+	Name              string
+	RouterModelID     string
+	HardwareVersionID *string
 }

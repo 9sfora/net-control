@@ -73,11 +73,13 @@ Payload da configuração inicial:
 
 ```json
 {
-  "name": "Roteador do cliente"
+  "name": "Roteador do cliente",
+  "router_model_id": "uuid-do-modelo",
+  "hardware_version_id": "uuid-da-versao-opcional"
 }
 ```
 
-A promoção move a identidade para `acs.routers` e preserva as sessões recebidas enquanto o equipamento ainda era desconhecido.
+A promoção move a identidade para `acs.routers` e preserva as sessões recebidas enquanto o equipamento ainda era desconhecido. O modelo é obrigatório; a versão de hardware é opcional. O backend rejeita associações cujo OUI, Product Class ou versão de hardware não correspondam aos dados reportados pelo CPE.
 
 Configuração desejada e ativação:
 

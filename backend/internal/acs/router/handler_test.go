@@ -22,9 +22,9 @@ func (f *fakeStore) ListUnknown(_ context.Context, tenantID string, _, _ int) ([
 	return []Unknown{{ID: "01945c44-d753-7d69-9d2c-1809de612345", SerialNumber: "SN1"}}, nil
 }
 
-func (f *fakeStore) Configure(_ context.Context, tenantID, _, name string) (Router, error) {
-	f.tenantID, f.name = tenantID, name
-	return Router{ID: "01945c44-d753-7d69-9d2c-1809de612346", Name: name}, nil
+func (f *fakeStore) Configure(_ context.Context, tenantID, _ string, input ConfigureUnknownInput) (Router, error) {
+	f.tenantID, f.name = tenantID, input.Name
+	return Router{ID: "01945c44-d753-7d69-9d2c-1809de612346", Name: input.Name}, nil
 }
 
 func TestListUnknownUsesAuthenticatedTenant(t *testing.T) {
@@ -52,7 +52,7 @@ func TestConfigureUnknown(t *testing.T) {
 	handler := NewHandler(store, tokens)
 	mux := http.NewServeMux()
 	handler.Register(mux)
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/acs/unknown-routers/01945c44-d753-7d69-9d2c-1809de612345/configure", strings.NewReader(`{"name":"Customer router"}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/acs/unknown-routers/01945c44-d753-7d69-9d2c-1809de612345/configure", strings.NewReader(`{"name":"Customer router","router_model_id":"01945c44-d753-7d69-9d2c-1809de612344"}`))
 	request.Header.Set("Authorization", "Bearer "+token)
 	response := httptest.NewRecorder()
 

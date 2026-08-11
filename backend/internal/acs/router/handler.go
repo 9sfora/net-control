@@ -17,7 +17,7 @@ var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-
 
 type Store interface {
 	ListUnknown(context.Context, string, int, int) ([]Unknown, error)
-	Configure(context.Context, string, string, string) (Router, error)
+	Configure(context.Context, string, string, ConfigureUnknownInput) (Router, error)
 }
 
 type Handler struct {
@@ -65,7 +65,9 @@ func (h *Handler) configure(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct {
-		Name string `json:"name"`
+		Name              string  `json:"name"`
+		RouterModelID     string  `json:"router_model_id"`
+		HardwareVersionID *string `json:"hardware_version_id"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	decoder.DisallowUnknownFields()
@@ -73,10 +75,27 @@ func (h *Handler) configure(w http.ResponseWriter, r *http.Request) {
 		httpserver.WriteError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "Name is required and must contain at most 200 characters")
 		return
 	}
+	input.RouterModelID = strings.TrimSpace(input.RouterModelID)
+	if !uuidPattern.MatchString(input.RouterModelID) || (input.HardwareVersionID != nil && !uuidPattern.MatchString(*input.HardwareVersionID)) {
+		httpserver.WriteError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "Valid router_model_id and hardware_version_id are required")
+		return
+	}
 	principal, _ := auth.PrincipalFromContext(r.Context())
-	configured, err := h.store.Configure(r.Context(), principal.TenantID, unknownID, strings.TrimSpace(input.Name))
+	configured, err := h.store.Configure(r.Context(), principal.TenantID, unknownID, ConfigureUnknownInput{Name: strings.TrimSpace(input.Name), RouterModelID: input.RouterModelID, HardwareVersionID: input.HardwareVersionID})
 	if errors.Is(err, ErrNotFound) {
 		httpserver.WriteError(w, r, http.StatusNotFound, "ACS_UNKNOWN_ROUTER_NOT_FOUND", "Unknown router not found")
+		return
+	}
+	if errors.Is(err, ErrInvalidModel) || errors.Is(err, ErrInvalidHardware) {
+		httpserver.WriteError(w, r, http.StatusBadRequest, "ACS_CATALOG_REFERENCE_INVALID", "Router model or hardware version is invalid")
+		return
+	}
+	if errors.Is(err, ErrIncompatibleModel) {
+		httpserver.WriteError(w, r, http.StatusConflict, "ACS_ROUTER_MODEL_INCOMPATIBLE", "Router model does not match the reported OUI or Product Class")
+		return
+	}
+	if errors.Is(err, ErrIncompatibleHardware) {
+		httpserver.WriteError(w, r, http.StatusConflict, "ACS_ROUTER_HARDWARE_INCOMPATIBLE", "Hardware version does not match the version reported by the router")
 		return
 	}
 	if err != nil {

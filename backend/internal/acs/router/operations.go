@@ -16,9 +16,11 @@ func (r *Repository) ListRouters(ctx context.Context, tenantID string, filter Li
 	items := make([]Summary, 0)
 	err := database.InTenantTransaction(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
-			SELECT id,name,manufacturer,oui,product_class,serial_number,software_version,hardware_version,
+			SELECT id,name,manufacturer,oui,product_class,serial_number,software_version,hardware_version,router_model_id,hardware_version_id,
 			       desired_status,reported_status,first_seen_at,last_seen_at,created_at,last_inform_at,
-			       host(last_ip_address),configuration_version,updated_at
+			       host(last_ip_address),configuration_version,updated_at,
+			       (SELECT name FROM acs.router_models WHERE id=router_model_id),
+			       (SELECT version FROM acs.router_model_hardware_versions WHERE id=hardware_version_id)
 			FROM acs.routers
 			WHERE tenant_id=$1
 			  AND ($2='' OR strpos(lower(name||' '||serial_number||' '||oui||' '||product_class),lower($2))>0)
@@ -50,9 +52,11 @@ func (r *Repository) GetRouter(ctx context.Context, tenantID, routerID string) (
 	detail := Detail{WiFi: make([]WiFiView, 0), Sessions: make([]Session, 0), Commands: make([]RecentCommand, 0)}
 	err := database.InTenantTransaction(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
 		row := tx.QueryRow(ctx, `
-			SELECT id,name,manufacturer,oui,product_class,serial_number,software_version,hardware_version,
+			SELECT id,name,manufacturer,oui,product_class,serial_number,software_version,hardware_version,router_model_id,hardware_version_id,
 			       desired_status,reported_status,first_seen_at,last_seen_at,created_at,last_inform_at,
-			       host(last_ip_address),configuration_version,updated_at
+			       host(last_ip_address),configuration_version,updated_at,
+			       (SELECT name FROM acs.router_models WHERE id=router_model_id),
+			       (SELECT version FROM acs.router_model_hardware_versions WHERE id=hardware_version_id)
 			FROM acs.routers WHERE tenant_id=$1 AND id=$2`, tenantID, routerID)
 		if err := scanSummary(row, &detail.Summary); errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
@@ -123,8 +127,9 @@ func (r *Repository) GetRouter(ctx context.Context, tenantID, routerID string) (
 
 func scanSummary(row scanner, item *Summary) error {
 	return row.Scan(&item.ID, &item.Name, &item.Manufacturer, &item.OUI, &item.ProductClass, &item.SerialNumber,
-		&item.SoftwareVersion, &item.HardwareVersion, &item.DesiredStatus, &item.ReportedStatus, &item.FirstSeenAt,
-		&item.LastSeenAt, &item.CreatedAt, &item.LastInformAt, &item.LastIPAddress, &item.ConfigurationVersion, &item.UpdatedAt)
+		&item.SoftwareVersion, &item.HardwareVersion, &item.RouterModelID, &item.HardwareVersionID, &item.DesiredStatus, &item.ReportedStatus, &item.FirstSeenAt,
+		&item.LastSeenAt, &item.CreatedAt, &item.LastInformAt, &item.LastIPAddress, &item.ConfigurationVersion, &item.UpdatedAt,
+		&item.RouterModelName, &item.CatalogHardwareVersion)
 }
 
 func ConnectivityStatus(lastSeen *time.Time, now time.Time, onlineTimeout, offlineTimeout time.Duration) string {

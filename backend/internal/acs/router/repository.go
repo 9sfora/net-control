@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/charlesduarte/net-control/backend/internal/platform/database"
 	"github.com/jackc/pgx/v5"
@@ -15,6 +16,10 @@ import (
 var (
 	ErrNotFound              = errors.New("router not found")
 	ErrConfigurationRequired = errors.New("router configuration is required")
+	ErrInvalidModel          = errors.New("router model is invalid")
+	ErrInvalidHardware       = errors.New("hardware version is invalid")
+	ErrIncompatibleModel     = errors.New("router model is incompatible")
+	ErrIncompatibleHardware  = errors.New("hardware version is incompatible")
 )
 
 type Repository struct{ pool *pgxpool.Pool }
@@ -57,7 +62,7 @@ func (r *Repository) ListUnknown(ctx context.Context, tenantID string, limit, of
 	return items, err
 }
 
-func (r *Repository) Configure(ctx context.Context, tenantID, unknownID, name string) (Router, error) {
+func (r *Repository) Configure(ctx context.Context, tenantID, unknownID string, input ConfigureUnknownInput) (Router, error) {
 	var configured Router
 	err := database.InTenantTransaction(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
 		var unknown Unknown
@@ -75,19 +80,42 @@ func (r *Repository) Configure(ctx context.Context, tenantID, unknownID, name st
 		if err != nil {
 			return fmt.Errorf("lock unknown router: %w", err)
 		}
+		var modelOUI, modelProductClass *string
+		if err := tx.QueryRow(ctx, `SELECT oui,product_class FROM acs.router_models WHERE tenant_id=$1 AND id=$2 AND active`, tenantID, input.RouterModelID).Scan(&modelOUI, &modelProductClass); errors.Is(err, pgx.ErrNoRows) {
+			return ErrInvalidModel
+		} else if err != nil {
+			return fmt.Errorf("find router model: %w", err)
+		}
+		if modelOUI != nil && *modelOUI != "" && !strings.EqualFold(*modelOUI, unknown.OUI) {
+			return ErrIncompatibleModel
+		}
+		if modelProductClass != nil && *modelProductClass != "" && !strings.EqualFold(*modelProductClass, unknown.ProductClass) {
+			return ErrIncompatibleModel
+		}
+		if input.HardwareVersionID != nil {
+			var version string
+			if err := tx.QueryRow(ctx, `SELECT version FROM acs.router_model_hardware_versions WHERE tenant_id=$1 AND router_model_id=$2 AND id=$3 AND active`, tenantID, input.RouterModelID, *input.HardwareVersionID).Scan(&version); errors.Is(err, pgx.ErrNoRows) {
+				return ErrInvalidHardware
+			} else if err != nil {
+				return fmt.Errorf("find hardware version: %w", err)
+			}
+			if unknown.HardwareVersion != nil && *unknown.HardwareVersion != "" && !strings.EqualFold(version, *unknown.HardwareVersion) {
+				return ErrIncompatibleHardware
+			}
+		}
 
 		err = tx.QueryRow(ctx, `
 			INSERT INTO acs.routers
 				(tenant_id, name, manufacturer, oui, product_class, serial_number, software_version,
-				 hardware_version, first_seen_at, last_seen_at, last_inform_at, last_ip_address)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, $11)
+				 hardware_version, first_seen_at, last_seen_at, last_inform_at, last_ip_address,router_model_id,hardware_version_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, $11,$12,$13)
 			RETURNING id, name, manufacturer, oui, product_class, serial_number, software_version,
-			          hardware_version, desired_status, reported_status, first_seen_at, last_seen_at, created_at`,
-			tenantID, name, unknown.Manufacturer, unknown.OUI, unknown.ProductClass, unknown.SerialNumber,
+			          hardware_version,router_model_id,hardware_version_id,desired_status, reported_status, first_seen_at, last_seen_at, created_at`,
+			tenantID, input.Name, unknown.Manufacturer, unknown.OUI, unknown.ProductClass, unknown.SerialNumber,
 			unknown.SoftwareVersion, unknown.HardwareVersion, unknown.FirstSeenAt, unknown.LastSeenAt,
-			unknown.LastIPAddress).Scan(&configured.ID, &configured.Name, &configured.Manufacturer,
+			unknown.LastIPAddress, input.RouterModelID, input.HardwareVersionID).Scan(&configured.ID, &configured.Name, &configured.Manufacturer,
 			&configured.OUI, &configured.ProductClass, &configured.SerialNumber, &configured.SoftwareVersion,
-			&configured.HardwareVersion, &configured.DesiredStatus, &configured.ReportedStatus,
+			&configured.HardwareVersion, &configured.RouterModelID, &configured.HardwareVersionID, &configured.DesiredStatus, &configured.ReportedStatus,
 			&configured.FirstSeenAt, &configured.LastSeenAt, &configured.CreatedAt)
 		if err != nil {
 			return fmt.Errorf("create configured router: %w", err)

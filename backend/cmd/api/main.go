@@ -35,7 +35,8 @@ func main() {
 
 	tokens := auth.NewTokenManager(cfg.AuthTokenSecret, cfg.AuthTokenTTL)
 	authHandler := auth.NewHandler(auth.NewService(auth.NewPostgresRepository(db), tokens), tokens)
-	server := httpserver.New(cfg.HTTPAddress, db, logger, authHandler.Register)
+	hosts := httpserver.VirtualHosts{Application: cfg.ApplicationFQDN, ACS: cfg.ACSFQDN}
+	server := httpserver.New(cfg.HTTPAddress, hosts, db, logger, authHandler.Register, nil)
 	serverErrors := make(chan error, 1)
 	go func() { serverErrors <- server.ListenAndServe() }()
 	logger.Info("api started", "address", cfg.HTTPAddress, "environment", cfg.Environment)

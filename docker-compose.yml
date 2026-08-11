@@ -37,6 +37,8 @@ services:
       DATABASE_URL: postgres://netcontrol_app:netcontrol_app@postgres:5432/netcontrol?sslmode=disable
       HTTP_ADDRESS: :8080
       AUTH_TOKEN_SECRET: ${AUTH_TOKEN_SECRET:-development-only-secret-change-me-now}
+      APPLICATION_FQDN: ${APPLICATION_FQDN:-localhost}
+      ACS_FQDN: ${ACS_FQDN:-acs.localhost}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -51,6 +53,8 @@ services:
       APP_ENV: development
       DATABASE_URL: postgres://netcontrol_app:netcontrol_app@postgres:5432/netcontrol?sslmode=disable
       AUTH_TOKEN_SECRET: ${AUTH_TOKEN_SECRET:-development-only-secret-change-me-now}
+      APPLICATION_FQDN: ${APPLICATION_FQDN:-localhost}
+      ACS_FQDN: ${ACS_FQDN:-acs.localhost}
     depends_on:
       migrate:
         condition: service_completed_successfully

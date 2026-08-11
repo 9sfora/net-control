@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -16,6 +17,8 @@ type Config struct {
 	WorkerInterval  time.Duration
 	AuthTokenSecret string
 	AuthTokenTTL    time.Duration
+	ApplicationFQDN string
+	ACSFQDN         string
 }
 
 func Load() (Config, error) {
@@ -27,6 +30,8 @@ func Load() (Config, error) {
 		WorkerInterval:  duration("WORKER_INTERVAL", time.Second),
 		AuthTokenSecret: os.Getenv("AUTH_TOKEN_SECRET"),
 		AuthTokenTTL:    duration("AUTH_TOKEN_TTL", 15*time.Minute),
+		ApplicationFQDN: strings.ToLower(strings.TrimSpace(os.Getenv("APPLICATION_FQDN"))),
+		ACSFQDN:         strings.ToLower(strings.TrimSpace(os.Getenv("ACS_FQDN"))),
 	}
 
 	if cfg.DatabaseURL == "" {
@@ -44,8 +49,34 @@ func Load() (Config, error) {
 	if cfg.AuthTokenTTL <= 0 {
 		return Config{}, errors.New("AUTH_TOKEN_TTL must be positive")
 	}
+	if !validFQDN(cfg.ApplicationFQDN) {
+		return Config{}, errors.New("APPLICATION_FQDN must be a valid hostname without scheme or path")
+	}
+	if !validFQDN(cfg.ACSFQDN) {
+		return Config{}, errors.New("ACS_FQDN must be a valid hostname without scheme or path")
+	}
+	if cfg.ApplicationFQDN == cfg.ACSFQDN {
+		return Config{}, errors.New("APPLICATION_FQDN and ACS_FQDN must be different")
+	}
 
 	return cfg, nil
+}
+
+func validFQDN(host string) bool {
+	if host == "" || len(host) > 253 || strings.ContainsAny(host, "/:@ ") {
+		return false
+	}
+	for _, label := range strings.Split(host, ".") {
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, char := range label {
+			if (char < 'a' || char > 'z') && (char < '0' || char > '9') && char != '-' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func value(key, fallback string) string {

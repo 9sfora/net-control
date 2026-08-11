@@ -1725,6 +1725,29 @@ InternetGatewayDevice.*
 
 Diferenças deverão ser tratadas por adapters, profiles ou mappings do módulo.
 
+## 69.1 Entradas HTTP e FQDNs
+
+O mesmo backend atenderá dois pontos de entrada lógicos:
+
+```text
+APPLICATION_FQDN=net-control.dominio.com
+ACS_FQDN=acs.dominio.com
+```
+
+- o FQDN da aplicação recebe a API administrativa, autenticada por usuário;
+- o FQDN ACS recebe somente sessões iniciadas pelos roteadores;
+- os dois nomes podem resolver para a mesma infraestrutura e processo;
+- o roteamento interno valida o header `Host` e não publica rotas administrativas no host ACS;
+- o proxy reverso/WAF deve validar TLS/SNI, preservar ou reescrever um `Host` confiável e aplicar políticas distintas por hostname.
+
+DNS apontando os dois nomes para o mesmo IP não cria isolamento de firewall de camada 3. A separação por hostname deve ser aplicada no proxy, load balancer ou WAF; regras por IP exigem endereços de entrada distintos.
+
+## 69.2 Fluxo CWMP
+
+No TR-069/CWMP, o CPE inicia a sessão HTTP com um `Inform`. O ACS identifica ou cadastra o equipamento a partir do `DeviceId`, registra eventos, parâmetros e a sessão, responde com `InformResponse` e seleciona comandos pendentes. Os RPCs, como alteração de SSID/senha ou reboot, são enviados pelo ACS nas trocas seguintes da mesma sessão. Respostas e falhas atualizam tentativas e o ciclo de vida do comando.
+
+O endpoint ACS não usa o JWT da aplicação. Ele terá autenticação própria de CPE, validação de identidade, blacklist, limites de payload e taxa, além do isolamento de tenant definido pela política de provisionamento do equipamento.
+
 ---
 
 # 70. Extensibilidade do ACS

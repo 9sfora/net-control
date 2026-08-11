@@ -13,8 +13,8 @@ docker compose up --build
 A API fica disponível em `http://localhost:8080`:
 
 ```bash
-curl http://localhost:8080/health
-curl http://localhost:8080/ready
+curl -H 'Host: localhost' http://localhost:8080/health
+curl -H 'Host: localhost' http://localhost:8080/ready
 ```
 
 Para executar os testes Go diretamente:
@@ -47,3 +47,14 @@ curl -X POST http://localhost:8080/api/v1/auth/login \
 ```
 
 Use o `access_token` retornado como `Authorization: Bearer <token>`. O endpoint `GET /api/v1/auth/me` retorna a identidade e as permissões do usuário autenticado.
+
+## FQDNs
+
+O mesmo processo atende dois hosts lógicos, configurados sem protocolo ou caminho:
+
+```text
+APPLICATION_FQDN=net-control.dominio.com
+ACS_FQDN=acs.dominio.com
+```
+
+O host da aplicação expõe a API administrativa autenticada. O host ACS será exclusivo para sessões iniciadas pelos equipamentos. Requisições para hosts desconhecidos recebem `421`, e rotas administrativas não existem no host ACS.

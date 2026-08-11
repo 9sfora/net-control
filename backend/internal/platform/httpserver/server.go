@@ -11,12 +11,18 @@ type Database interface {
 	Ping(context.Context) error
 }
 
-func New(address string, db Database, logger *slog.Logger, registerRoutes func(*http.ServeMux)) *http.Server {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
+type VirtualHosts struct {
+	Application string
+	ACS         string
+}
+
+func New(address string, hosts VirtualHosts, db Database, logger *slog.Logger, registerApplication, registerACS func(*http.ServeMux)) *http.Server {
+	applicationMux := http.NewServeMux()
+	acsMux := http.NewServeMux()
+	health := func(w http.ResponseWriter, _ *http.Request) {
 		WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-	})
-	mux.HandleFunc("GET /ready", func(w http.ResponseWriter, r *http.Request) {
+	}
+	ready := func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
 		if err := db.Ping(ctx); err != nil {
@@ -24,17 +30,27 @@ func New(address string, db Database, logger *slog.Logger, registerRoutes func(*
 			return
 		}
 		WriteJSON(w, http.StatusOK, map[string]string{"status": "ready"})
-	})
-	if registerRoutes != nil {
-		registerRoutes(mux)
 	}
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	for _, mux := range []*http.ServeMux{applicationMux, acsMux} {
+		mux.HandleFunc("GET /health", health)
+		mux.HandleFunc("GET /ready", ready)
+	}
+	if registerApplication != nil {
+		registerApplication(applicationMux)
+	}
+	if registerACS != nil {
+		registerACS(acsMux)
+	}
+	notFound := func(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, http.StatusNotFound, "NOT_FOUND", "Resource not found")
-	})
+	}
+	applicationMux.HandleFunc("/", notFound)
+	acsMux.HandleFunc("/", notFound)
+	hostHandler := routeByHost(hosts, applicationMux, acsMux)
 
 	return &http.Server{
 		Addr:              address,
-		Handler:           middleware(logger, mux),
+		Handler:           middleware(logger, hostHandler),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,

@@ -1,0 +1,5 @@
+.git
+.env
+frontend/node_modules
+backend/bin
+backend/coverage.out

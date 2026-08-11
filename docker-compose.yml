@@ -1,0 +1,56 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: netcontrol
+      POSTGRES_USER: netcontrol
+      POSTGRES_PASSWORD: netcontrol
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U netcontrol -d netcontrol"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  migrate:
+    image: migrate/migrate:v4.18.3
+    command:
+      - -path=/migrations
+      - -database=postgres://netcontrol:netcontrol@postgres:5432/netcontrol?sslmode=disable
+      - up
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./postgres/migrations:/migrations:ro
+
+  backend:
+    build:
+      context: .
+      dockerfile: dockerfiles/backend.Dockerfile
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgres://netcontrol:netcontrol@postgres:5432/netcontrol?sslmode=disable
+      HTTP_ADDRESS: :8080
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "8080:8080"
+
+  worker:
+    build:
+      context: .
+      dockerfile: dockerfiles/worker.Dockerfile
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgres://netcontrol:netcontrol@postgres:5432/netcontrol?sslmode=disable
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  postgres_data:

@@ -1748,6 +1748,14 @@ No TR-069/CWMP, o CPE inicia a sessão HTTP com um `Inform`. O ACS identifica ou
 
 O endpoint ACS não usa o JWT da aplicação. Ele terá autenticação própria de CPE, validação de identidade, blacklist, limites de payload e taxa, além do isolamento de tenant definido pela política de provisionamento do equipamento.
 
+## 69.3 Entrega de configuração
+
+Após o `InformResponse`, um POST vazio do CPE permite ao ACS selecionar atomicamente um comando pendente com `FOR UPDATE SKIP LOCKED`. Para `ACTIVATE`, o ACS converte o snapshot da configuração desejada em um RPC `SetParameterValues` e registra uma tentativa vinculada à sessão.
+
+O profile inicial utiliza a árvore TR-181 (`Device.*`). Profiles futuros poderão mapear os mesmos campos de domínio para `InternetGatewayDevice.*` ou parâmetros proprietários sem alterar a fila de comandos.
+
+Uma resposta `SetParameterValuesResponse` conclui comando e tentativa. Um `SOAP Fault` registra o código e a mensagem do CPE e marca a execução como falha. A senha Wi-Fi permanece cifrada em repouso e só é decifrada em memória durante a geração do RPC enviado ao equipamento.
+
 ---
 
 # 70. Extensibilidade do ACS

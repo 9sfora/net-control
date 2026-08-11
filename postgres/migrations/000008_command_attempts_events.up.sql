@@ -1,3 +1,6 @@
+ALTER TABLE acs.router_sessions
+    ADD CONSTRAINT router_sessions_tenant_id_id_unique UNIQUE (tenant_id, id);
+
 CREATE TABLE acs.router_command_attempts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL,

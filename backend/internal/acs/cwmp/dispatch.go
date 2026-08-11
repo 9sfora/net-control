@@ -102,7 +102,7 @@ func (d *Dispatcher) Next(ctx context.Context, sessionID string) (OutboundComman
 		if _, err := tx.Exec(ctx, `UPDATE acs.router_commands SET status='PROCESSING', attempts_count=$2, started_at=COALESCE(started_at,now()) WHERE id=$1`, outbound.ID, attemptNumber); err != nil {
 			return fmt.Errorf("start command: %w", err)
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO acs.router_command_events (tenant_id,router_command_id,from_status,to_status,reason,metadata) VALUES ($1,$2,NULL,'PROCESSING','Delivered in CWMP session',jsonb_build_object('session_id',$3,'attempt_id',$4))`, tenantID, outbound.ID, sessionID, outbound.AttemptID)
+		_, err = tx.Exec(ctx, `INSERT INTO acs.router_command_events (tenant_id,router_command_id,from_status,to_status,reason,metadata) VALUES ($1,$2,NULL,'PROCESSING','Delivered in CWMP session',jsonb_build_object('session_id',$3::text,'attempt_id',$4::text))`, tenantID, outbound.ID, sessionID, outbound.AttemptID)
 		return err
 	})
 	return outbound, err

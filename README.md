@@ -120,3 +120,12 @@ Para enfileirar a ativação:
 ```
 
 O header opcional `Idempotency-Key` evita comandos duplicados. `WIFI_ENCRYPTION_KEY` deve conter uma chave aleatória de 32 bytes codificada em Base64; o valor padrão do Compose serve somente para desenvolvimento.
+
+Na sessão CWMP de um roteador conhecido, o fluxo de ativação é:
+
+```text
+Inform → InformResponse → POST vazio → SetParameterValues
+       → SetParameterValuesResponse → comando COMPLETED
+```
+
+O claim do comando usa `FOR UPDATE SKIP LOCKED`, cria uma entrada em `router_command_attempts` e registra transições em `router_command_events`. Um `SOAP Fault` marca tentativa e comando como `FAILED`, preservando código e mensagem retornados pelo CPE. O profile inicial gera parâmetros TR-181 (`Device.*`); mappings específicos por fabricante/modelo serão adicionados separadamente.

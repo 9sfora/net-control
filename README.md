@@ -193,3 +193,25 @@ Retorna, em um snapshot consistente por tenant:
 - dez falhas recentes.
 
 A rota exige a permissão `acs.dashboard.read`.
+
+## Catálogo ACS
+
+```text
+GET|POST /api/v1/acs/manufacturers
+PUT      /api/v1/acs/manufacturers/{id}
+
+GET|POST /api/v1/acs/router-models
+GET|PUT  /api/v1/acs/router-models/{id}
+
+POST /api/v1/acs/router-models/{id}/hardware-versions
+PUT  /api/v1/acs/router-models/{id}/hardware-versions/{version_id}
+```
+
+O catálogo suporta capacidades Wi-Fi, modos de autenticação, Product Class, OUI normalizado, protocolo e múltiplas versões de hardware. Nomes são únicos sem diferenciar maiúsculas e minúsculas dentro do tenant.
+
+Permissões:
+
+```text
+acs.catalog.read
+acs.catalog.manage
+```

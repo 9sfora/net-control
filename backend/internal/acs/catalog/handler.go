@@ -1,0 +1,252 @@
+package catalog
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"regexp"
+	"strings"
+
+	"github.com/charlesduarte/net-control/backend/internal/core/auth"
+	"github.com/charlesduarte/net-control/backend/internal/platform/httpserver"
+)
+
+var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$`)
+var ouiPattern = regexp.MustCompile(`^[0-9A-F]{6}$`)
+
+type Store interface {
+	ListManufacturers(context.Context, string, string) ([]Manufacturer, error)
+	SaveManufacturer(context.Context, string, string, ManufacturerInput) (Manufacturer, error)
+	ListModels(context.Context, string, string, string) ([]RouterModel, error)
+	GetModel(context.Context, string, string) (RouterModel, error)
+	SaveModel(context.Context, string, string, RouterModelInput) (RouterModel, error)
+	SaveHardwareVersion(context.Context, string, string, string, HardwareVersionInput) (HardwareVersion, error)
+}
+type Handler struct {
+	store  Store
+	tokens *auth.TokenManager
+}
+
+func NewHandler(store Store, tokens *auth.TokenManager) *Handler {
+	return &Handler{store: store, tokens: tokens}
+}
+func (h *Handler) Register(mux *http.ServeMux) {
+	read := func(next http.Handler) http.Handler {
+		return auth.Authenticate(h.tokens, auth.RequirePermission("acs.catalog.read", next))
+	}
+	manage := func(next http.Handler) http.Handler {
+		return auth.Authenticate(h.tokens, auth.RequirePermission("acs.catalog.manage", next))
+	}
+	mux.Handle("GET /api/v1/acs/manufacturers", read(http.HandlerFunc(h.listManufacturers)))
+	mux.Handle("POST /api/v1/acs/manufacturers", manage(http.HandlerFunc(h.createManufacturer)))
+	mux.Handle("PUT /api/v1/acs/manufacturers/{id}", manage(http.HandlerFunc(h.updateManufacturer)))
+	mux.Handle("GET /api/v1/acs/router-models", read(http.HandlerFunc(h.listModels)))
+	mux.Handle("GET /api/v1/acs/router-models/{id}", read(http.HandlerFunc(h.getModel)))
+	mux.Handle("POST /api/v1/acs/router-models", manage(http.HandlerFunc(h.createModel)))
+	mux.Handle("PUT /api/v1/acs/router-models/{id}", manage(http.HandlerFunc(h.updateModel)))
+	mux.Handle("POST /api/v1/acs/router-models/{id}/hardware-versions", manage(http.HandlerFunc(h.createHardware)))
+	mux.Handle("PUT /api/v1/acs/router-models/{id}/hardware-versions/{version_id}", manage(http.HandlerFunc(h.updateHardware)))
+}
+func (h *Handler) listManufacturers(w http.ResponseWriter, r *http.Request) {
+	p, _ := auth.PrincipalFromContext(r.Context())
+	items, err := h.store.ListManufacturers(r.Context(), p.TenantID, strings.TrimSpace(r.URL.Query().Get("search")))
+	if err != nil {
+		internal(w, r)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"data": items})
+}
+func (h *Handler) createManufacturer(w http.ResponseWriter, r *http.Request) {
+	h.saveManufacturer(w, r, "")
+}
+func (h *Handler) updateManufacturer(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validID(w, r, id) {
+		return
+	}
+	h.saveManufacturer(w, r, id)
+}
+func (h *Handler) saveManufacturer(w http.ResponseWriter, r *http.Request, id string) {
+	var input ManufacturerInput
+	if !decode(w, r, &input) {
+		return
+	}
+	input.Name = strings.TrimSpace(input.Name)
+	if input.Name == "" || len(input.Name) > 200 {
+		validation(w, r, "Name is required and must contain at most 200 characters")
+		return
+	}
+	p, _ := auth.PrincipalFromContext(r.Context())
+	item, err := h.store.SaveManufacturer(r.Context(), p.TenantID, id, input)
+	if writeCatalogError(w, r, err) {
+		return
+	}
+	status := http.StatusOK
+	if id == "" {
+		status = http.StatusCreated
+	}
+	httpserver.WriteJSON(w, status, map[string]any{"data": item})
+}
+func (h *Handler) listModels(w http.ResponseWriter, r *http.Request) {
+	manufacturerID := strings.TrimSpace(r.URL.Query().Get("manufacturer_id"))
+	if manufacturerID != "" && !uuidPattern.MatchString(manufacturerID) {
+		validation(w, r, "Invalid manufacturer ID")
+		return
+	}
+	p, _ := auth.PrincipalFromContext(r.Context())
+	items, err := h.store.ListModels(r.Context(), p.TenantID, strings.TrimSpace(r.URL.Query().Get("search")), manufacturerID)
+	if err != nil {
+		internal(w, r)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"data": items})
+}
+func (h *Handler) getModel(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validID(w, r, id) {
+		return
+	}
+	p, _ := auth.PrincipalFromContext(r.Context())
+	item, err := h.store.GetModel(r.Context(), p.TenantID, id)
+	if writeCatalogError(w, r, err) {
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"data": item})
+}
+func (h *Handler) createModel(w http.ResponseWriter, r *http.Request) { h.saveModel(w, r, "") }
+func (h *Handler) updateModel(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validID(w, r, id) {
+		return
+	}
+	h.saveModel(w, r, id)
+}
+func (h *Handler) saveModel(w http.ResponseWriter, r *http.Request, id string) {
+	var input RouterModelInput
+	if !decode(w, r, &input) {
+		return
+	}
+	input.Name = strings.TrimSpace(input.Name)
+	input.ManufacturerID = strings.TrimSpace(input.ManufacturerID)
+	input.Protocol = strings.ToUpper(strings.TrimSpace(input.Protocol))
+	if input.Protocol == "" {
+		input.Protocol = "TR-069"
+	}
+	if input.Name == "" || len(input.Name) > 200 || !uuidPattern.MatchString(input.ManufacturerID) {
+		validation(w, r, "Name and a valid manufacturer_id are required")
+		return
+	}
+	if input.Protocol != "TR-069" {
+		validation(w, r, "Protocol must be TR-069")
+		return
+	}
+	if input.OUI != nil {
+		normalized := strings.ToUpper(strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(*input.OUI), ":", ""), "-", ""))
+		if !ouiPattern.MatchString(normalized) {
+			validation(w, r, "OUI must contain 6 hexadecimal characters")
+			return
+		}
+		input.OUI = &normalized
+	}
+	seen := map[string]bool{}
+	for index, mode := range input.SupportedAuthModes {
+		mode = strings.ToUpper(strings.TrimSpace(mode))
+		if mode != "WPA2_PSK" && mode != "WPA3_SAE" && mode != "WPA2_WPA3" {
+			validation(w, r, "Unsupported authentication mode")
+			return
+		}
+		if seen[mode] {
+			validation(w, r, "Authentication modes must be unique")
+			return
+		}
+		seen[mode] = true
+		input.SupportedAuthModes[index] = mode
+	}
+	p, _ := auth.PrincipalFromContext(r.Context())
+	item, err := h.store.SaveModel(r.Context(), p.TenantID, id, input)
+	if writeCatalogError(w, r, err) {
+		return
+	}
+	status := http.StatusOK
+	if id == "" {
+		status = http.StatusCreated
+	}
+	httpserver.WriteJSON(w, status, map[string]any{"data": item})
+}
+func (h *Handler) createHardware(w http.ResponseWriter, r *http.Request) {
+	modelID := r.PathValue("id")
+	if !validID(w, r, modelID) {
+		return
+	}
+	h.saveHardware(w, r, modelID, "")
+}
+func (h *Handler) updateHardware(w http.ResponseWriter, r *http.Request) {
+	modelID, id := r.PathValue("id"), r.PathValue("version_id")
+	if !validID(w, r, modelID) || !validID(w, r, id) {
+		return
+	}
+	h.saveHardware(w, r, modelID, id)
+}
+func (h *Handler) saveHardware(w http.ResponseWriter, r *http.Request, modelID, id string) {
+	var input HardwareVersionInput
+	if !decode(w, r, &input) {
+		return
+	}
+	input.Version = strings.TrimSpace(input.Version)
+	if input.Version == "" || len(input.Version) > 100 {
+		validation(w, r, "Version is required and must contain at most 100 characters")
+		return
+	}
+	p, _ := auth.PrincipalFromContext(r.Context())
+	item, err := h.store.SaveHardwareVersion(r.Context(), p.TenantID, modelID, id, input)
+	if writeCatalogError(w, r, err) {
+		return
+	}
+	status := http.StatusOK
+	if id == "" {
+		status = http.StatusCreated
+	}
+	httpserver.WriteJSON(w, status, map[string]any{"data": item})
+}
+func decode(w http.ResponseWriter, r *http.Request, value any) bool {
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(value); err != nil {
+		validation(w, r, "Invalid request body")
+		return false
+	}
+	return true
+}
+func validID(w http.ResponseWriter, r *http.Request, id string) bool {
+	if !uuidPattern.MatchString(id) {
+		validation(w, r, "Invalid ID")
+		return false
+	}
+	return true
+}
+func validation(w http.ResponseWriter, r *http.Request, message string) {
+	httpserver.WriteError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", message)
+}
+func internal(w http.ResponseWriter, r *http.Request) {
+	httpserver.WriteError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "Internal server error")
+}
+func writeCatalogError(w http.ResponseWriter, r *http.Request, err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, ErrNotFound) {
+		httpserver.WriteError(w, r, http.StatusNotFound, "ACS_CATALOG_NOT_FOUND", "Catalog item not found")
+		return true
+	}
+	if errors.Is(err, ErrConflict) {
+		httpserver.WriteError(w, r, http.StatusConflict, "ACS_CATALOG_CONFLICT", "Catalog item already exists")
+		return true
+	}
+	if errors.Is(err, ErrInvalidReference) {
+		validation(w, r, "Referenced catalog item does not exist")
+		return true
+	}
+	internal(w, r)
+	return true
+}

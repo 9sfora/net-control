@@ -1,0 +1,65 @@
+package catalog
+
+import (
+	"encoding/json"
+	"time"
+)
+
+type Manufacturer struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description *string   `json:"description"`
+	Active      bool      `json:"active"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+type HardwareVersion struct {
+	ID            string    `json:"id"`
+	RouterModelID string    `json:"router_model_id"`
+	Version       string    `json:"version"`
+	Description   *string   `json:"description"`
+	Active        bool      `json:"active"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+type RouterModel struct {
+	ID                    string            `json:"id"`
+	ManufacturerID        string            `json:"manufacturer_id"`
+	ManufacturerName      string            `json:"manufacturer_name"`
+	Name                  string            `json:"name"`
+	ManufacturerModelName *string           `json:"manufacturer_model_name"`
+	SupportsWiFi24        bool              `json:"supports_wifi_2_4"`
+	SupportsWiFi5         bool              `json:"supports_wifi_5"`
+	SupportedAuthModes    json.RawMessage   `json:"supported_auth_modes"`
+	ProductClass          *string           `json:"product_class"`
+	OUI                   *string           `json:"oui"`
+	Protocol              string            `json:"protocol"`
+	Description           *string           `json:"description"`
+	Active                bool              `json:"active"`
+	CreatedAt             time.Time         `json:"created_at"`
+	UpdatedAt             time.Time         `json:"updated_at"`
+	HardwareVersions      []HardwareVersion `json:"hardware_versions,omitempty"`
+}
+type ManufacturerInput struct {
+	Name        string  `json:"name"`
+	Description *string `json:"description"`
+	Active      *bool   `json:"active"`
+}
+type RouterModelInput struct {
+	ManufacturerID        string   `json:"manufacturer_id"`
+	Name                  string   `json:"name"`
+	ManufacturerModelName *string  `json:"manufacturer_model_name"`
+	SupportsWiFi24        bool     `json:"supports_wifi_2_4"`
+	SupportsWiFi5         bool     `json:"supports_wifi_5"`
+	SupportedAuthModes    []string `json:"supported_auth_modes"`
+	ProductClass          *string  `json:"product_class"`
+	OUI                   *string  `json:"oui"`
+	Protocol              string   `json:"protocol"`
+	Description           *string  `json:"description"`
+	Active                *bool    `json:"active"`
+}
+type HardwareVersionInput struct {
+	Version     string  `json:"version"`
+	Description *string `json:"description"`
+	Active      *bool   `json:"active"`
+}

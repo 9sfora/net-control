@@ -46,6 +46,7 @@ func main() {
 	authHandler := auth.NewHandler(auth.NewService(auth.NewPostgresRepository(db), tokens), tokens)
 	routerRepository := acsrouter.NewRepository(db)
 	routerHandler := acsrouter.NewHandler(routerRepository, tokens)
+	operationsHandler := acsrouter.NewOperationsHandler(routerRepository, tokens, cfg.ACSOnlineTimeout, cfg.ACSOfflineTimeout)
 	configurationHandler := acsrouter.NewConfigurationHandler(routerRepository, tokens, wifiCipher)
 	commandHandler := acscommand.NewHandler(acscommand.NewRepository(db), tokens)
 	cwmpDispatcher := cwmp.NewDispatcher(db, cfg.ACSDefaultTenantSlug, wifiCipher)
@@ -54,6 +55,7 @@ func main() {
 	registerApplication := func(mux *http.ServeMux) {
 		authHandler.Register(mux)
 		routerHandler.Register(mux)
+		operationsHandler.Register(mux)
 		configurationHandler.Register(mux)
 		commandHandler.Register(mux)
 	}

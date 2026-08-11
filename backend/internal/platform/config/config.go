@@ -24,6 +24,8 @@ type Config struct {
 	WiFiEncryptionKey        string
 	CommandProcessingTimeout time.Duration
 	CommandRetryIntervals    []time.Duration
+	ACSOnlineTimeout         time.Duration
+	ACSOfflineTimeout        time.Duration
 }
 
 func Load() (Config, error) {
@@ -40,6 +42,8 @@ func Load() (Config, error) {
 		ACSDefaultTenantSlug:     strings.ToLower(strings.TrimSpace(os.Getenv("ACS_DEFAULT_TENANT_SLUG"))),
 		WiFiEncryptionKey:        os.Getenv("WIFI_ENCRYPTION_KEY"),
 		CommandProcessingTimeout: duration("COMMAND_PROCESSING_TIMEOUT", 5*time.Minute),
+		ACSOnlineTimeout:         duration("ACS_ONLINE_TIMEOUT", 10*time.Minute),
+		ACSOfflineTimeout:        duration("ACS_OFFLINE_TIMEOUT", 24*time.Hour),
 	}
 
 	if cfg.DatabaseURL == "" {
@@ -80,6 +84,9 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	cfg.CommandRetryIntervals = retryIntervals
+	if cfg.ACSOnlineTimeout <= 0 || cfg.ACSOfflineTimeout <= cfg.ACSOnlineTimeout {
+		return Config{}, errors.New("ACS timeouts must be positive and ACS_OFFLINE_TIMEOUT must exceed ACS_ONLINE_TIMEOUT")
+	}
 
 	return cfg, nil
 }

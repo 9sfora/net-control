@@ -158,3 +158,21 @@ POST /api/v1/acs/commands/{id}/cancel
 ```
 
 O detalhe inclui tentativas e eventos em ordem cronológica. O snapshot sensível da configuração não é exposto. Apenas comandos em `PENDING`, `WAITING_DEVICE` ou `RETRY_SCHEDULED` podem ser cancelados; estados em execução ou finais retornam conflito.
+
+## API de roteadores
+
+```text
+GET /api/v1/acs/routers
+GET /api/v1/acs/routers/{id}
+```
+
+A listagem aceita `search`, `connectivity_status`, `desired_status`, `limit` e `offset`. O detalhe reúne configuração Wi-Fi mascarada, rede, as 20 sessões mais recentes e os 20 comandos mais recentes.
+
+A conectividade é calculada a partir de `last_seen_at`, sem boolean persistido:
+
+```env
+ACS_ONLINE_TIMEOUT=10m
+ACS_OFFLINE_TIMEOUT=24h
+```
+
+Os estados possíveis são `ONLINE`, `STALE`, `OFFLINE` e `NEVER_CONNECTED`.

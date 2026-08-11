@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/charlesduarte/net-control/backend/internal/acs/cwmp"
 	"github.com/charlesduarte/net-control/backend/internal/core/auth"
 	"github.com/charlesduarte/net-control/backend/internal/platform/config"
 	"github.com/charlesduarte/net-control/backend/internal/platform/database"
@@ -35,8 +36,9 @@ func main() {
 
 	tokens := auth.NewTokenManager(cfg.AuthTokenSecret, cfg.AuthTokenTTL)
 	authHandler := auth.NewHandler(auth.NewService(auth.NewPostgresRepository(db), tokens), tokens)
+	cwmpHandler := cwmp.NewHandler(cwmp.NewRepository(db, cfg.ACSDefaultTenantSlug), logger)
 	hosts := httpserver.VirtualHosts{Application: cfg.ApplicationFQDN, ACS: cfg.ACSFQDN}
-	server := httpserver.New(cfg.HTTPAddress, hosts, db, logger, authHandler.Register, nil)
+	server := httpserver.New(cfg.HTTPAddress, hosts, db, logger, authHandler.Register, cwmpHandler.Register)
 	serverErrors := make(chan error, 1)
 	go func() { serverErrors <- server.ListenAndServe() }()
 	logger.Info("api started", "address", cfg.HTTPAddress, "environment", cfg.Environment)

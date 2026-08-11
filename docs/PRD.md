@@ -582,6 +582,18 @@ Campos:
 
 ## 23. Sessões ACS
 
+### 23.1 Descoberta de equipamentos
+
+O CPE usa uma URL fixa no FQDN ACS e inicia a comunicação com um `Inform`. O tenant dessa entrada é definido por `ACS_DEFAULT_TENANT_SLUG` na implantação. A identidade técnica é composta por:
+
+```text
+OUI + ProductClass + SerialNumber
+```
+
+Se essa identidade ainda não estiver em `acs.routers`, o equipamento é criado ou atualizado em `acs.unknown_routers`. O operador poderá revisar seus dados e promovê-lo para um roteador configurado. Um equipamento desconhecido não recebe comandos de configuração.
+
+Quando a identidade já pertence a um roteador configurado, a comunicação atualiza seus dados reportados e pode prosseguir para a entrega de comandos pendentes.
+
 Cada comunicação relevante poderá ser associada a uma sessão.
 
 Dados sugeridos:

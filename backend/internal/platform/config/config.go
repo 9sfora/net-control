@@ -10,28 +10,30 @@ import (
 )
 
 type Config struct {
-	Environment     string
-	HTTPAddress     string
-	DatabaseURL     string
-	ShutdownTimeout time.Duration
-	WorkerInterval  time.Duration
-	AuthTokenSecret string
-	AuthTokenTTL    time.Duration
-	ApplicationFQDN string
-	ACSFQDN         string
+	Environment          string
+	HTTPAddress          string
+	DatabaseURL          string
+	ShutdownTimeout      time.Duration
+	WorkerInterval       time.Duration
+	AuthTokenSecret      string
+	AuthTokenTTL         time.Duration
+	ApplicationFQDN      string
+	ACSFQDN              string
+	ACSDefaultTenantSlug string
 }
 
 func Load() (Config, error) {
 	cfg := Config{
-		Environment:     value("APP_ENV", "development"),
-		HTTPAddress:     value("HTTP_ADDRESS", ":8080"),
-		DatabaseURL:     os.Getenv("DATABASE_URL"),
-		ShutdownTimeout: duration("SHUTDOWN_TIMEOUT", 10*time.Second),
-		WorkerInterval:  duration("WORKER_INTERVAL", time.Second),
-		AuthTokenSecret: os.Getenv("AUTH_TOKEN_SECRET"),
-		AuthTokenTTL:    duration("AUTH_TOKEN_TTL", 15*time.Minute),
-		ApplicationFQDN: strings.ToLower(strings.TrimSpace(os.Getenv("APPLICATION_FQDN"))),
-		ACSFQDN:         strings.ToLower(strings.TrimSpace(os.Getenv("ACS_FQDN"))),
+		Environment:          value("APP_ENV", "development"),
+		HTTPAddress:          value("HTTP_ADDRESS", ":8080"),
+		DatabaseURL:          os.Getenv("DATABASE_URL"),
+		ShutdownTimeout:      duration("SHUTDOWN_TIMEOUT", 10*time.Second),
+		WorkerInterval:       duration("WORKER_INTERVAL", time.Second),
+		AuthTokenSecret:      os.Getenv("AUTH_TOKEN_SECRET"),
+		AuthTokenTTL:         duration("AUTH_TOKEN_TTL", 15*time.Minute),
+		ApplicationFQDN:      strings.ToLower(strings.TrimSpace(os.Getenv("APPLICATION_FQDN"))),
+		ACSFQDN:              strings.ToLower(strings.TrimSpace(os.Getenv("ACS_FQDN"))),
+		ACSDefaultTenantSlug: strings.ToLower(strings.TrimSpace(os.Getenv("ACS_DEFAULT_TENANT_SLUG"))),
 	}
 
 	if cfg.DatabaseURL == "" {
@@ -58,8 +60,23 @@ func Load() (Config, error) {
 	if cfg.ApplicationFQDN == cfg.ACSFQDN {
 		return Config{}, errors.New("APPLICATION_FQDN and ACS_FQDN must be different")
 	}
+	if !validSlug(cfg.ACSDefaultTenantSlug) {
+		return Config{}, errors.New("ACS_DEFAULT_TENANT_SLUG must contain lowercase letters, numbers and hyphens")
+	}
 
 	return cfg, nil
+}
+
+func validSlug(value string) bool {
+	if value == "" || value[0] == '-' || value[len(value)-1] == '-' {
+		return false
+	}
+	for _, char := range value {
+		if (char < 'a' || char > 'z') && (char < '0' || char > '9') && char != '-' {
+			return false
+		}
+	}
+	return true
 }
 
 func validFQDN(host string) bool {

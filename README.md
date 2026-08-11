@@ -55,6 +55,9 @@ O mesmo processo atende dois hosts lógicos, configurados sem protocolo ou camin
 ```text
 APPLICATION_FQDN=net-control.dominio.com
 ACS_FQDN=acs.dominio.com
+ACS_DEFAULT_TENANT_SLUG=netcontrol
 ```
 
 O host da aplicação expõe a API administrativa autenticada. O host ACS será exclusivo para sessões iniciadas pelos equipamentos. Requisições para hosts desconhecidos recebem `421`, e rotas administrativas não existem no host ACS.
+
+O endpoint inicial dos equipamentos é `POST /cwmp`. O slug padrão associa essa URL fixa ao tenant responsável pelos equipamentos descobertos. Um `Inform` válido cria ou atualiza a entrada em `acs.unknown_routers`; se a identidade já existir em `acs.routers`, atualiza o equipamento configurado. Cada `Inform` também abre um registro em `acs.router_sessions`.

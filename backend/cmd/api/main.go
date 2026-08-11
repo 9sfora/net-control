@@ -46,7 +46,8 @@ func main() {
 	routerRepository := acsrouter.NewRepository(db)
 	routerHandler := acsrouter.NewHandler(routerRepository, tokens)
 	configurationHandler := acsrouter.NewConfigurationHandler(routerRepository, tokens, wifiCipher)
-	cwmpHandler := cwmp.NewHandler(cwmp.NewRepository(db, cfg.ACSDefaultTenantSlug), logger)
+	cwmpDispatcher := cwmp.NewDispatcher(db, cfg.ACSDefaultTenantSlug, wifiCipher)
+	cwmpHandler := cwmp.NewHandler(cwmp.NewRepository(db, cfg.ACSDefaultTenantSlug), cwmpDispatcher, logger)
 	hosts := httpserver.VirtualHosts{Application: cfg.ApplicationFQDN, ACS: cfg.ACSFQDN}
 	registerApplication := func(mux *http.ServeMux) {
 		authHandler.Register(mux)

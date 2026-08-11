@@ -9,6 +9,8 @@ import (
 	"net"
 	"net/http"
 	"strings"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const maxRequestBody = 2 << 20
@@ -17,13 +19,19 @@ type InformRecorder interface {
 	RecordInform(context.Context, Inform, string, string) (Reception, error)
 }
 
+type CommandDispatcher interface {
+	Next(context.Context, string) (OutboundCommand, error)
+	Complete(context.Context, string, CommandResult) error
+}
+
 type Handler struct {
 	repository InformRecorder
+	dispatcher CommandDispatcher
 	logger     *slog.Logger
 }
 
-func NewHandler(repository InformRecorder, logger *slog.Logger) *Handler {
-	return &Handler{repository: repository, logger: logger}
+func NewHandler(repository InformRecorder, dispatcher CommandDispatcher, logger *slog.Logger) *Handler {
+	return &Handler{repository: repository, dispatcher: dispatcher, logger: logger}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -37,13 +45,13 @@ func (h *Handler) cwmp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(bytes.TrimSpace(body)) == 0 {
-		w.WriteHeader(http.StatusNoContent)
+		h.dispatch(w, r)
 		return
 	}
 
 	inform, err := ParseInform(bytes.NewReader(body))
 	if errors.Is(err, ErrInvalidInform) {
-		http.Error(w, "invalid CWMP Inform", http.StatusBadRequest)
+		h.complete(w, r, body)
 		return
 	}
 	if err != nil {
@@ -66,6 +74,58 @@ func (h *Handler) cwmp(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/xml; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(InformResponse(inform.ID))
+}
+
+func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request) {
+	sessionID, ok := sessionID(r)
+	if !ok || h.dispatcher == nil {
+		http.Error(w, "invalid ACS session", http.StatusBadRequest)
+		return
+	}
+	command, err := h.dispatcher.Next(r.Context(), sessionID)
+	if errors.Is(err, ErrNoCommand) {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if err != nil {
+		h.logger.ErrorContext(r.Context(), "CWMP command dispatch failed", "error", err, "session_id", sessionID)
+		http.Error(w, "ACS unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Content-Type", "text/xml; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(SetParameterValues(command))
+}
+
+func (h *Handler) complete(w http.ResponseWriter, r *http.Request, body []byte) {
+	sessionID, ok := sessionID(r)
+	if !ok || h.dispatcher == nil {
+		http.Error(w, "invalid ACS session", http.StatusBadRequest)
+		return
+	}
+	result, err := ParseCommandResult(body)
+	if err != nil {
+		http.Error(w, "unsupported CWMP message", http.StatusBadRequest)
+		return
+	}
+	if err := h.dispatcher.Complete(r.Context(), sessionID, result); err != nil && !errors.Is(err, ErrNoCommand) {
+		h.logger.ErrorContext(r.Context(), "CWMP command completion failed", "error", err, "session_id", sessionID)
+		http.Error(w, "ACS unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func sessionID(r *http.Request) (string, bool) {
+	cookie, err := r.Cookie("ACS_SESSION")
+	if err != nil {
+		return "", false
+	}
+	var id pgtype.UUID
+	if err := id.Scan(cookie.Value); err != nil || !id.Valid {
+		return "", false
+	}
+	return cookie.Value, true
 }
 
 func remoteIP(r *http.Request) string {

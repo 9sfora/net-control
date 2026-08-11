@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -154,13 +155,39 @@ func (r *Repository) CreateActivationCommand(ctx context.Context, tenantID, rout
 		if version == 0 {
 			return ErrConfigurationRequired
 		}
-		parameters := map[string]any{"configuration_version": version}
+		wifi := make([]map[string]any, 0)
+		rows, err := tx.Query(ctx, `SELECT band, ssid, encrypted_password, security_mode, channel, channel_mode, bandwidth_mhz, enabled FROM acs.router_wifi_radios WHERE tenant_id=$1 AND router_id=$2 ORDER BY band`, tenantID, routerID)
+		if err != nil {
+			return fmt.Errorf("load Wi-Fi configuration: %w", err)
+		}
+		for rows.Next() {
+			var band, ssid, securityMode, channelMode string
+			var encrypted []byte
+			var channel, bandwidth *int
+			var enabled bool
+			if err := rows.Scan(&band, &ssid, &encrypted, &securityMode, &channel, &channelMode, &bandwidth, &enabled); err != nil {
+				rows.Close()
+				return fmt.Errorf("scan Wi-Fi configuration: %w", err)
+			}
+			wifi = append(wifi, map[string]any{"band": band, "ssid": ssid, "encrypted_password": base64.StdEncoding.EncodeToString(encrypted), "security_mode": securityMode, "channel": channel, "channel_mode": channelMode, "bandwidth_mhz": bandwidth, "enabled": enabled})
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("iterate Wi-Fi configuration: %w", err)
+		}
+		var dhcpEnabled bool
+		var dhcpStart, dhcpEnd, dnsPrimary, dnsSecondary *string
+		var lease *int
+		if err := tx.QueryRow(ctx, `SELECT host(dhcp_start), host(dhcp_end), dhcp_enabled, dhcp_lease_seconds, host(dns_primary), host(dns_secondary) FROM acs.router_network_settings WHERE tenant_id=$1 AND router_id=$2`, tenantID, routerID).Scan(&dhcpStart, &dhcpEnd, &dhcpEnabled, &lease, &dnsPrimary, &dnsSecondary); err != nil {
+			return fmt.Errorf("load network configuration: %w", err)
+		}
+		parameters := map[string]any{"configuration_version": version, "configuration": map[string]any{"wifi": wifi, "network": map[string]any{"dhcp_enabled": dhcpEnabled, "dhcp_start": dhcpStart, "dhcp_end": dhcpEnd, "dhcp_lease_seconds": lease, "dns_primary": dnsPrimary, "dns_secondary": dnsSecondary}}}
 		encodedParameters, _ := json.Marshal(parameters)
 		var key any
 		if idempotencyKey != "" {
 			key = idempotencyKey
 		}
-		err := tx.QueryRow(ctx, `
+		err = tx.QueryRow(ctx, `
 			INSERT INTO acs.router_commands (tenant_id, router_id, created_by, type, parameters, idempotency_key)
 			VALUES ($1,$2,$3,'ACTIVATE',$4,$5)
 			ON CONFLICT (tenant_id, idempotency_key) WHERE idempotency_key IS NOT NULL
@@ -171,7 +198,11 @@ func (r *Repository) CreateActivationCommand(ctx context.Context, tenantID, rout
 		if err != nil {
 			return fmt.Errorf("create activation command: %w", err)
 		}
-		return json.Unmarshal(encodedParameters, &command.Parameters)
+		if err := json.Unmarshal(encodedParameters, &command.Parameters); err != nil {
+			return err
+		}
+		command.Parameters = map[string]any{"configuration_version": version}
+		return nil
 	})
 	return command, err
 }

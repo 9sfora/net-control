@@ -21,7 +21,7 @@ func (f *fakeRecorder) RecordInform(_ context.Context, inform Inform, _, _ strin
 
 func TestHandlerReceivesInform(t *testing.T) {
 	repository := &fakeRecorder{}
-	handler := NewHandler(repository, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	handler := NewHandler(repository, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	mux := http.NewServeMux()
 	handler.Register(mux)
 	request := httptest.NewRequest(http.MethodPost, "/cwmp", strings.NewReader(sampleInform))

@@ -148,3 +148,13 @@ WORKER_INTERVAL=1s
 COMMAND_PROCESSING_TIMEOUT=5m
 COMMAND_RETRY_INTERVALS=30s,2m,10m
 ```
+
+## API da fila
+
+```text
+GET  /api/v1/acs/commands?status=WAITING_DEVICE&router_id={uuid}&limit=50&offset=0
+GET  /api/v1/acs/commands/{id}
+POST /api/v1/acs/commands/{id}/cancel
+```
+
+O detalhe inclui tentativas e eventos em ordem cronológica. O snapshot sensível da configuração não é exposto. Apenas comandos em `PENDING`, `WAITING_DEVICE` ou `RETRY_SCHEDULED` podem ser cancelados; estados em execução ou finais retornam conflito.

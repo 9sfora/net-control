@@ -15,6 +15,7 @@ import (
 	"github.com/charlesduarte/net-control/backend/internal/platform/config"
 	"github.com/charlesduarte/net-control/backend/internal/platform/database"
 	"github.com/charlesduarte/net-control/backend/internal/platform/httpserver"
+	"github.com/charlesduarte/net-control/backend/internal/platform/security"
 )
 
 func main() {
@@ -36,13 +37,21 @@ func main() {
 	defer db.Close()
 
 	tokens := auth.NewTokenManager(cfg.AuthTokenSecret, cfg.AuthTokenTTL)
+	wifiCipher, err := security.NewCipher(cfg.WiFiEncryptionKey)
+	if err != nil {
+		logger.Error("Wi-Fi encryption initialization failed", "error", err)
+		os.Exit(1)
+	}
 	authHandler := auth.NewHandler(auth.NewService(auth.NewPostgresRepository(db), tokens), tokens)
-	routerHandler := acsrouter.NewHandler(acsrouter.NewRepository(db), tokens)
+	routerRepository := acsrouter.NewRepository(db)
+	routerHandler := acsrouter.NewHandler(routerRepository, tokens)
+	configurationHandler := acsrouter.NewConfigurationHandler(routerRepository, tokens, wifiCipher)
 	cwmpHandler := cwmp.NewHandler(cwmp.NewRepository(db, cfg.ACSDefaultTenantSlug), logger)
 	hosts := httpserver.VirtualHosts{Application: cfg.ApplicationFQDN, ACS: cfg.ACSFQDN}
 	registerApplication := func(mux *http.ServeMux) {
 		authHandler.Register(mux)
 		routerHandler.Register(mux)
+		configurationHandler.Register(mux)
 	}
 	server := httpserver.New(cfg.HTTPAddress, hosts, db, logger, registerApplication, cwmpHandler.Register)
 	serverErrors := make(chan error, 1)

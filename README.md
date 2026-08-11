@@ -78,3 +78,45 @@ Payload da configuração inicial:
 ```
 
 A promoção move a identidade para `acs.routers` e preserva as sessões recebidas enquanto o equipamento ainda era desconhecido.
+
+Configuração desejada e ativação:
+
+```text
+PUT  /api/v1/acs/routers/{id}/configuration
+POST /api/v1/acs/routers/{id}/commands
+```
+
+Exemplo de configuração:
+
+```json
+{
+  "wifi": [
+    {
+      "band": "2.4GHZ",
+      "ssid": "Cliente",
+      "password": "senha-segura",
+      "security_mode": "WPA2_PSK",
+      "channel_mode": "AUTO",
+      "enabled": true
+    }
+  ],
+  "network": {
+    "dhcp_enabled": true,
+    "dhcp_start": "192.168.1.100",
+    "dhcp_end": "192.168.1.200",
+    "dhcp_lease_seconds": 86400,
+    "dns_primary": "1.1.1.1",
+    "dns_secondary": "1.0.0.1"
+  }
+}
+```
+
+Para enfileirar a ativação:
+
+```json
+{
+  "type": "ACTIVATE"
+}
+```
+
+O header opcional `Idempotency-Key` evita comandos duplicados. `WIFI_ENCRYPTION_KEY` deve conter uma chave aleatória de 32 bytes codificada em Base64; o valor padrão do Compose serve somente para desenvolvimento.

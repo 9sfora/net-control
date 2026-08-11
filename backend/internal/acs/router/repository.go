@@ -11,7 +11,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-var ErrNotFound = errors.New("unknown router not found")
+var (
+	ErrNotFound              = errors.New("router not found")
+	ErrConfigurationRequired = errors.New("router configuration is required")
+)
 
 type Repository struct{ pool *pgxpool.Pool }
 
@@ -100,4 +103,75 @@ func (r *Repository) Configure(ctx context.Context, tenantID, unknownID, name st
 		return nil
 	})
 	return configured, err
+}
+
+func (r *Repository) SaveConfiguration(ctx context.Context, tenantID, routerID string, configuration DesiredConfiguration) (ConfigurationResult, error) {
+	result := ConfigurationResult{RouterID: routerID}
+	err := database.InTenantTransaction(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `SELECT configuration_version FROM acs.routers WHERE tenant_id = $1 AND id = $2 FOR UPDATE`, tenantID, routerID).Scan(&result.Version); errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		} else if err != nil {
+			return fmt.Errorf("lock router: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM acs.router_wifi_radios WHERE tenant_id = $1 AND router_id = $2`, tenantID, routerID); err != nil {
+			return fmt.Errorf("replace Wi-Fi configuration: %w", err)
+		}
+		for _, radio := range configuration.WiFi {
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO acs.router_wifi_radios
+					(tenant_id, router_id, band, ssid, encrypted_password, security_mode, channel, channel_mode, bandwidth_mhz, enabled)
+				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, tenantID, routerID, radio.Band, radio.SSID,
+				radio.EncryptedPassword, radio.SecurityMode, radio.Channel, radio.ChannelMode, radio.BandwidthMHz, radio.Enabled); err != nil {
+				return fmt.Errorf("save Wi-Fi radio: %w", err)
+			}
+		}
+		network := configuration.Network
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO acs.router_network_settings
+				(tenant_id, router_id, dhcp_enabled, dhcp_start, dhcp_end, dhcp_lease_seconds, dns_primary, dns_secondary)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+			ON CONFLICT (router_id) DO UPDATE SET dhcp_enabled=EXCLUDED.dhcp_enabled,
+				dhcp_start=EXCLUDED.dhcp_start, dhcp_end=EXCLUDED.dhcp_end,
+				dhcp_lease_seconds=EXCLUDED.dhcp_lease_seconds, dns_primary=EXCLUDED.dns_primary,
+				dns_secondary=EXCLUDED.dns_secondary`, tenantID, routerID, network.DHCPEnabled,
+			network.DHCPStart, network.DHCPEnd, network.DHCPLeaseSeconds, network.DNSPrimary, network.DNSSecondary); err != nil {
+			return fmt.Errorf("save network configuration: %w", err)
+		}
+		return tx.QueryRow(ctx, `UPDATE acs.routers SET configuration_version = configuration_version + 1 WHERE id = $1 RETURNING configuration_version`, routerID).Scan(&result.Version)
+	})
+	return result, err
+}
+
+func (r *Repository) CreateActivationCommand(ctx context.Context, tenantID, routerID, userID, idempotencyKey string) (Command, error) {
+	var command Command
+	err := database.InTenantTransaction(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		var version int64
+		if err := tx.QueryRow(ctx, `SELECT configuration_version FROM acs.routers WHERE tenant_id=$1 AND id=$2`, tenantID, routerID).Scan(&version); errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		} else if err != nil {
+			return fmt.Errorf("find router: %w", err)
+		}
+		if version == 0 {
+			return ErrConfigurationRequired
+		}
+		parameters := map[string]any{"configuration_version": version}
+		encodedParameters, _ := json.Marshal(parameters)
+		var key any
+		if idempotencyKey != "" {
+			key = idempotencyKey
+		}
+		err := tx.QueryRow(ctx, `
+			INSERT INTO acs.router_commands (tenant_id, router_id, created_by, type, parameters, idempotency_key)
+			VALUES ($1,$2,$3,'ACTIVATE',$4,$5)
+			ON CONFLICT (tenant_id, idempotency_key) WHERE idempotency_key IS NOT NULL
+			DO UPDATE SET idempotency_key=EXCLUDED.idempotency_key
+			RETURNING id, router_id, type, status, priority, parameters, idempotency_key`,
+			tenantID, routerID, userID, encodedParameters, key).Scan(&command.ID, &command.RouterID, &command.Type,
+			&command.Status, &command.Priority, &encodedParameters, &command.IdempotencyKey)
+		if err != nil {
+			return fmt.Errorf("create activation command: %w", err)
+		}
+		return json.Unmarshal(encodedParameters, &command.Parameters)
+	})
+	return command, err
 }

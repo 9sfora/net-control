@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -20,6 +21,7 @@ type Config struct {
 	ApplicationFQDN      string
 	ACSFQDN              string
 	ACSDefaultTenantSlug string
+	WiFiEncryptionKey    string
 }
 
 func Load() (Config, error) {
@@ -34,6 +36,7 @@ func Load() (Config, error) {
 		ApplicationFQDN:      strings.ToLower(strings.TrimSpace(os.Getenv("APPLICATION_FQDN"))),
 		ACSFQDN:              strings.ToLower(strings.TrimSpace(os.Getenv("ACS_FQDN"))),
 		ACSDefaultTenantSlug: strings.ToLower(strings.TrimSpace(os.Getenv("ACS_DEFAULT_TENANT_SLUG"))),
+		WiFiEncryptionKey:    os.Getenv("WIFI_ENCRYPTION_KEY"),
 	}
 
 	if cfg.DatabaseURL == "" {
@@ -62,6 +65,9 @@ func Load() (Config, error) {
 	}
 	if !validSlug(cfg.ACSDefaultTenantSlug) {
 		return Config{}, errors.New("ACS_DEFAULT_TENANT_SLUG must contain lowercase letters, numbers and hyphens")
+	}
+	if key, err := base64.StdEncoding.DecodeString(cfg.WiFiEncryptionKey); err != nil || len(key) != 32 {
+		return Config{}, errors.New("WIFI_ENCRYPTION_KEY must be a base64-encoded 32-byte key")
 	}
 
 	return cfg, nil

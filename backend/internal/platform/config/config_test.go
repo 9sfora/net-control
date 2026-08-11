@@ -13,6 +13,7 @@ func TestLoad(t *testing.T) {
 	t.Setenv("APPLICATION_FQDN", "net-control.example.com")
 	t.Setenv("ACS_FQDN", "acs.example.com")
 	t.Setenv("ACS_DEFAULT_TENANT_SLUG", "netcontrol")
+	t.Setenv("WIFI_ENCRYPTION_KEY", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 
 	cfg, err := Load()
 	if err != nil {
@@ -28,6 +29,7 @@ func TestLoadRequiresDatabaseURL(t *testing.T) {
 	t.Setenv("APPLICATION_FQDN", "net-control.example.com")
 	t.Setenv("ACS_FQDN", "acs.example.com")
 	t.Setenv("ACS_DEFAULT_TENANT_SLUG", "netcontrol")
+	t.Setenv("WIFI_ENCRYPTION_KEY", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	t.Setenv("DATABASE_URL", "")
 	if _, err := Load(); err == nil {
 		t.Fatal("Load() expected an error")

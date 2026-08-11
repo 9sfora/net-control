@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/charlesduarte/net-control/backend/internal/acs/cwmp"
+	acsrouter "github.com/charlesduarte/net-control/backend/internal/acs/router"
 	"github.com/charlesduarte/net-control/backend/internal/core/auth"
 	"github.com/charlesduarte/net-control/backend/internal/platform/config"
 	"github.com/charlesduarte/net-control/backend/internal/platform/database"
@@ -36,9 +37,14 @@ func main() {
 
 	tokens := auth.NewTokenManager(cfg.AuthTokenSecret, cfg.AuthTokenTTL)
 	authHandler := auth.NewHandler(auth.NewService(auth.NewPostgresRepository(db), tokens), tokens)
+	routerHandler := acsrouter.NewHandler(acsrouter.NewRepository(db), tokens)
 	cwmpHandler := cwmp.NewHandler(cwmp.NewRepository(db, cfg.ACSDefaultTenantSlug), logger)
 	hosts := httpserver.VirtualHosts{Application: cfg.ApplicationFQDN, ACS: cfg.ACSFQDN}
-	server := httpserver.New(cfg.HTTPAddress, hosts, db, logger, authHandler.Register, cwmpHandler.Register)
+	registerApplication := func(mux *http.ServeMux) {
+		authHandler.Register(mux)
+		routerHandler.Register(mux)
+	}
+	server := httpserver.New(cfg.HTTPAddress, hosts, db, logger, registerApplication, cwmpHandler.Register)
 	serverErrors := make(chan error, 1)
 	go func() { serverErrors <- server.ListenAndServe() }()
 	logger.Info("api started", "address", cfg.HTTPAddress, "environment", cfg.Environment)

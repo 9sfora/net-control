@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/charlesduarte/net-control/backend/internal/core/auth"
 	"github.com/charlesduarte/net-control/backend/internal/platform/config"
 	"github.com/charlesduarte/net-control/backend/internal/platform/database"
 	"github.com/charlesduarte/net-control/backend/internal/platform/httpserver"
@@ -32,7 +33,9 @@ func main() {
 	}
 	defer db.Close()
 
-	server := httpserver.New(cfg.HTTPAddress, db, logger)
+	tokens := auth.NewTokenManager(cfg.AuthTokenSecret, cfg.AuthTokenTTL)
+	authHandler := auth.NewHandler(auth.NewService(auth.NewPostgresRepository(db), tokens), tokens)
+	server := httpserver.New(cfg.HTTPAddress, db, logger, authHandler.Register)
 	serverErrors := make(chan error, 1)
 	go func() { serverErrors <- server.ListenAndServe() }()
 	logger.Info("api started", "address", cfg.HTTPAddress, "environment", cfg.Environment)

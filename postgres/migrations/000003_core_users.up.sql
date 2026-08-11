@@ -9,7 +9,8 @@ CREATE TABLE public.users (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT users_name_not_blank CHECK (btrim(name) <> ''),
     CONSTRAINT users_email_not_blank CHECK (btrim(email) <> ''),
-    CONSTRAINT users_tenant_email_unique UNIQUE (tenant_id, email)
+    CONSTRAINT users_tenant_email_unique UNIQUE (tenant_id, email),
+    CONSTRAINT users_tenant_id_id_unique UNIQUE (tenant_id, id)
 );
 
 CREATE INDEX users_tenant_id_idx ON public.users (tenant_id);

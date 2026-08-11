@@ -15,14 +15,14 @@ type apiError struct {
 	RequestID string `json:"request_id,omitempty"`
 }
 
-func writeJSON(w http.ResponseWriter, status int, value any) {
+func WriteJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
 }
 
-func writeError(w http.ResponseWriter, r *http.Request, status int, code, message string) {
-	writeJSON(w, status, errorEnvelope{Error: apiError{
+func WriteError(w http.ResponseWriter, r *http.Request, status int, code, message string) {
+	WriteJSON(w, status, errorEnvelope{Error: apiError{
 		Code: code, Message: message, RequestID: RequestID(r.Context()),
 	}})
 }

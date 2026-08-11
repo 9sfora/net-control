@@ -14,6 +14,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
 
   migrate:
     image: migrate/migrate:v4.18.3
@@ -33,8 +34,9 @@ services:
       dockerfile: dockerfiles/backend.Dockerfile
     environment:
       APP_ENV: development
-      DATABASE_URL: postgres://netcontrol:netcontrol@postgres:5432/netcontrol?sslmode=disable
+      DATABASE_URL: postgres://netcontrol_app:netcontrol_app@postgres:5432/netcontrol?sslmode=disable
       HTTP_ADDRESS: :8080
+      AUTH_TOKEN_SECRET: ${AUTH_TOKEN_SECRET:-development-only-secret-change-me-now}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -47,7 +49,25 @@ services:
       dockerfile: dockerfiles/worker.Dockerfile
     environment:
       APP_ENV: development
+      DATABASE_URL: postgres://netcontrol_app:netcontrol_app@postgres:5432/netcontrol?sslmode=disable
+      AUTH_TOKEN_SECRET: ${AUTH_TOKEN_SECRET:-development-only-secret-change-me-now}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  bootstrap:
+    profiles: ["tools"]
+    build:
+      context: .
+      dockerfile: dockerfiles/backend.Dockerfile
+    entrypoint: ["/netcontrol-bootstrap"]
+    environment:
       DATABASE_URL: postgres://netcontrol:netcontrol@postgres:5432/netcontrol?sslmode=disable
+      BOOTSTRAP_TENANT_NAME: ${BOOTSTRAP_TENANT_NAME:-NetControl}
+      BOOTSTRAP_TENANT_SLUG: ${BOOTSTRAP_TENANT_SLUG:-netcontrol}
+      BOOTSTRAP_ADMIN_NAME: ${BOOTSTRAP_ADMIN_NAME:-Administrator}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@netcontrol.local}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
     depends_on:
       migrate:
         condition: service_completed_successfully

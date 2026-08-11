@@ -9,6 +9,7 @@ func TestLoad(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://localhost/netcontrol")
 	t.Setenv("HTTP_ADDRESS", ":9090")
 	t.Setenv("WORKER_INTERVAL", "2s")
+	t.Setenv("AUTH_TOKEN_SECRET", "test-secret-with-at-least-32-characters")
 
 	cfg, err := Load()
 	if err != nil {
@@ -20,6 +21,7 @@ func TestLoad(t *testing.T) {
 }
 
 func TestLoadRequiresDatabaseURL(t *testing.T) {
+	t.Setenv("AUTH_TOKEN_SECRET", "test-secret-with-at-least-32-characters")
 	t.Setenv("DATABASE_URL", "")
 	if _, err := Load(); err == nil {
 		t.Fatal("Load() expected an error")

@@ -15,7 +15,7 @@ type contextKey string
 const requestIDKey contextKey = "request_id"
 
 func middleware(logger *slog.Logger, next http.Handler) http.Handler {
-	return recoverer(logger, requestLogger(logger, securityHeaders(requestID(next))))
+	return requestID(securityHeaders(requestLogger(logger, recoverer(logger, next))))
 }
 
 func requestID(next http.Handler) http.Handler {
@@ -66,7 +66,7 @@ func recoverer(logger *slog.Logger, next http.Handler) http.Handler {
 		defer func() {
 			if recovered := recover(); recovered != nil {
 				logger.ErrorContext(r.Context(), "panic recovered", "error", recovered, "stack", string(debug.Stack()))
-				writeError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "Internal server error")
+				WriteError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "Internal server error")
 			}
 		}()
 		next.ServeHTTP(w, r)

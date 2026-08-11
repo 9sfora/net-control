@@ -176,3 +176,20 @@ ACS_OFFLINE_TIMEOUT=24h
 ```
 
 Os estados possíveis são `ONLINE`, `STALE`, `OFFLINE` e `NEVER_CONNECTED`.
+
+## Dashboard ACS
+
+```text
+GET /api/v1/acs/dashboard
+```
+
+Retorna, em um snapshot consistente por tenant:
+
+- totais de roteadores por conectividade e bloqueio;
+- comandos pendentes, aguardando dispositivo, processando, em retentativa, falhos e expirados;
+- comandos concluídos nas últimas 24 horas;
+- dez conexões recentes;
+- dez atividades recentes da fila;
+- dez falhas recentes.
+
+A rota exige a permissão `acs.dashboard.read`.

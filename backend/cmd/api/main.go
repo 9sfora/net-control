@@ -11,6 +11,7 @@ import (
 
 	acscommand "github.com/charlesduarte/net-control/backend/internal/acs/command"
 	"github.com/charlesduarte/net-control/backend/internal/acs/cwmp"
+	"github.com/charlesduarte/net-control/backend/internal/acs/dashboard"
 	acsrouter "github.com/charlesduarte/net-control/backend/internal/acs/router"
 	"github.com/charlesduarte/net-control/backend/internal/core/auth"
 	"github.com/charlesduarte/net-control/backend/internal/platform/config"
@@ -49,6 +50,7 @@ func main() {
 	operationsHandler := acsrouter.NewOperationsHandler(routerRepository, tokens, cfg.ACSOnlineTimeout, cfg.ACSOfflineTimeout)
 	configurationHandler := acsrouter.NewConfigurationHandler(routerRepository, tokens, wifiCipher)
 	commandHandler := acscommand.NewHandler(acscommand.NewRepository(db), tokens)
+	dashboardHandler := dashboard.NewHandler(dashboard.NewRepository(db), tokens, cfg.ACSOnlineTimeout, cfg.ACSOfflineTimeout)
 	cwmpDispatcher := cwmp.NewDispatcher(db, cfg.ACSDefaultTenantSlug, wifiCipher)
 	cwmpHandler := cwmp.NewHandler(cwmp.NewRepository(db, cfg.ACSDefaultTenantSlug), cwmpDispatcher, logger)
 	hosts := httpserver.VirtualHosts{Application: cfg.ApplicationFQDN, ACS: cfg.ACSFQDN}
@@ -58,6 +60,7 @@ func main() {
 		operationsHandler.Register(mux)
 		configurationHandler.Register(mux)
 		commandHandler.Register(mux)
+		dashboardHandler.Register(mux)
 	}
 	server := httpserver.New(cfg.HTTPAddress, hosts, db, logger, registerApplication, cwmpHandler.Register)
 	serverErrors := make(chan error, 1)

@@ -11,32 +11,35 @@ import (
 )
 
 type Config struct {
-	Environment          string
-	HTTPAddress          string
-	DatabaseURL          string
-	ShutdownTimeout      time.Duration
-	WorkerInterval       time.Duration
-	AuthTokenSecret      string
-	AuthTokenTTL         time.Duration
-	ApplicationFQDN      string
-	ACSFQDN              string
-	ACSDefaultTenantSlug string
-	WiFiEncryptionKey    string
+	Environment              string
+	HTTPAddress              string
+	DatabaseURL              string
+	ShutdownTimeout          time.Duration
+	WorkerInterval           time.Duration
+	AuthTokenSecret          string
+	AuthTokenTTL             time.Duration
+	ApplicationFQDN          string
+	ACSFQDN                  string
+	ACSDefaultTenantSlug     string
+	WiFiEncryptionKey        string
+	CommandProcessingTimeout time.Duration
+	CommandRetryIntervals    []time.Duration
 }
 
 func Load() (Config, error) {
 	cfg := Config{
-		Environment:          value("APP_ENV", "development"),
-		HTTPAddress:          value("HTTP_ADDRESS", ":8080"),
-		DatabaseURL:          os.Getenv("DATABASE_URL"),
-		ShutdownTimeout:      duration("SHUTDOWN_TIMEOUT", 10*time.Second),
-		WorkerInterval:       duration("WORKER_INTERVAL", time.Second),
-		AuthTokenSecret:      os.Getenv("AUTH_TOKEN_SECRET"),
-		AuthTokenTTL:         duration("AUTH_TOKEN_TTL", 15*time.Minute),
-		ApplicationFQDN:      strings.ToLower(strings.TrimSpace(os.Getenv("APPLICATION_FQDN"))),
-		ACSFQDN:              strings.ToLower(strings.TrimSpace(os.Getenv("ACS_FQDN"))),
-		ACSDefaultTenantSlug: strings.ToLower(strings.TrimSpace(os.Getenv("ACS_DEFAULT_TENANT_SLUG"))),
-		WiFiEncryptionKey:    os.Getenv("WIFI_ENCRYPTION_KEY"),
+		Environment:              value("APP_ENV", "development"),
+		HTTPAddress:              value("HTTP_ADDRESS", ":8080"),
+		DatabaseURL:              os.Getenv("DATABASE_URL"),
+		ShutdownTimeout:          duration("SHUTDOWN_TIMEOUT", 10*time.Second),
+		WorkerInterval:           duration("WORKER_INTERVAL", time.Second),
+		AuthTokenSecret:          os.Getenv("AUTH_TOKEN_SECRET"),
+		AuthTokenTTL:             duration("AUTH_TOKEN_TTL", 15*time.Minute),
+		ApplicationFQDN:          strings.ToLower(strings.TrimSpace(os.Getenv("APPLICATION_FQDN"))),
+		ACSFQDN:                  strings.ToLower(strings.TrimSpace(os.Getenv("ACS_FQDN"))),
+		ACSDefaultTenantSlug:     strings.ToLower(strings.TrimSpace(os.Getenv("ACS_DEFAULT_TENANT_SLUG"))),
+		WiFiEncryptionKey:        os.Getenv("WIFI_ENCRYPTION_KEY"),
+		CommandProcessingTimeout: duration("COMMAND_PROCESSING_TIMEOUT", 5*time.Minute),
 	}
 
 	if cfg.DatabaseURL == "" {
@@ -69,8 +72,33 @@ func Load() (Config, error) {
 	if key, err := base64.StdEncoding.DecodeString(cfg.WiFiEncryptionKey); err != nil || len(key) != 32 {
 		return Config{}, errors.New("WIFI_ENCRYPTION_KEY must be a base64-encoded 32-byte key")
 	}
+	if cfg.CommandProcessingTimeout <= 0 {
+		return Config{}, errors.New("COMMAND_PROCESSING_TIMEOUT must be positive")
+	}
+	retryIntervals, err := durations("COMMAND_RETRY_INTERVALS", "30s,2m,10m")
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.CommandRetryIntervals = retryIntervals
 
 	return cfg, nil
+}
+
+func durations(key, fallback string) ([]time.Duration, error) {
+	raw := value(key, fallback)
+	parts := strings.Split(raw, ",")
+	result := make([]time.Duration, 0, len(parts))
+	for _, part := range parts {
+		parsed, err := time.ParseDuration(strings.TrimSpace(part))
+		if err != nil || parsed <= 0 {
+			return nil, fmt.Errorf("%s must contain positive comma-separated durations", key)
+		}
+		result = append(result, parsed)
+	}
+	if len(result) == 0 {
+		return nil, fmt.Errorf("%s must not be empty", key)
+	}
+	return result, nil
 }
 
 func validSlug(value string) bool {

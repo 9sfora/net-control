@@ -759,17 +759,18 @@ EXPIRED
 
 # 24. Retentativas
 
-Configuração padrão inicial:
+Configuração padrão inicial do worker:
 
 ```text
 Tentativa 1: imediata
-Tentativa 2: +1 minuto
-Tentativa 3: +5 minutos
-Tentativa 4: +15 minutos
-Tentativa 5: +1 hora
+Tentativa 2: +30 segundos
+Tentativa 3: +2 minutos
+Tentativas seguintes: +10 minutos
 ```
 
-Configuração deverá poder ser alterada.
+Os intervalos são definidos por `COMMAND_RETRY_INTERVALS`. `COMMAND_PROCESSING_TIMEOUT` determina quando uma tentativa sem resposta é considerada travada.
+
+O worker processa cada tenant em uma transação isolada por RLS. Ele move comandos novos para `WAITING_DEVICE`, expira comandos vencidos, encerra tentativas travadas e agenda `RETRY_SCHEDULED`. Quando `max_attempts` é atingido, o comando passa para `FAILED`.
 
 ---
 

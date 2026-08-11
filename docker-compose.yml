@@ -41,6 +41,8 @@ services:
       ACS_FQDN: ${ACS_FQDN:-acs.localhost}
       ACS_DEFAULT_TENANT_SLUG: ${ACS_DEFAULT_TENANT_SLUG:-netcontrol}
       WIFI_ENCRYPTION_KEY: ${WIFI_ENCRYPTION_KEY:-MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
+      COMMAND_PROCESSING_TIMEOUT: ${COMMAND_PROCESSING_TIMEOUT:-5m}
+      COMMAND_RETRY_INTERVALS: ${COMMAND_RETRY_INTERVALS:-30s,2m,10m}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -59,6 +61,8 @@ services:
       ACS_FQDN: ${ACS_FQDN:-acs.localhost}
       ACS_DEFAULT_TENANT_SLUG: ${ACS_DEFAULT_TENANT_SLUG:-netcontrol}
       WIFI_ENCRYPTION_KEY: ${WIFI_ENCRYPTION_KEY:-MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
+      COMMAND_PROCESSING_TIMEOUT: ${COMMAND_PROCESSING_TIMEOUT:-5m}
+      COMMAND_RETRY_INTERVALS: ${COMMAND_RETRY_INTERVALS:-30s,2m,10m}
     depends_on:
       migrate:
         condition: service_completed_successfully

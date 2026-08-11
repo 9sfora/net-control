@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/charlesduarte/net-control/backend/internal/acs/command"
 	"github.com/charlesduarte/net-control/backend/internal/platform/config"
 	"github.com/charlesduarte/net-control/backend/internal/platform/database"
 )
@@ -30,6 +31,7 @@ func main() {
 	defer db.Close()
 
 	logger.Info("worker started", "environment", cfg.Environment)
+	scheduler := command.NewScheduler(db, logger, cfg.CommandProcessingTimeout, cfg.CommandRetryIntervals)
 	ticker := time.NewTicker(cfg.WorkerInterval)
 	defer ticker.Stop()
 	for {
@@ -38,7 +40,16 @@ func main() {
 			logger.Info("worker stopped")
 			return
 		case <-ticker.C:
-			// Command claiming will be added with the ACS command module.
+			result, err := scheduler.Run(ctx)
+			if err != nil {
+				logger.ErrorContext(ctx, "command scheduler failed", "error", err)
+				continue
+			}
+			if result.Waiting+result.Expired+result.Recovered+result.Failed > 0 {
+				logger.InfoContext(ctx, "command maintenance completed",
+					"waiting", result.Waiting, "expired", result.Expired,
+					"recovered", result.Recovered, "failed", result.Failed)
+			}
 		}
 	}
 }

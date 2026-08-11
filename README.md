@@ -129,3 +129,22 @@ Inform → InformResponse → POST vazio → SetParameterValues
 ```
 
 O claim do comando usa `FOR UPDATE SKIP LOCKED`, cria uma entrada em `router_command_attempts` e registra transições em `router_command_events`. Um `SOAP Fault` marca tentativa e comando como `FAILED`, preservando código e mensagem retornados pelo CPE. O profile inicial gera parâmetros TR-181 (`Device.*`); mappings específicos por fabricante/modelo serão adicionados separadamente.
+
+## Manutenção da fila
+
+O worker percorre os tenants ativos e executa a manutenção da fila dentro de transações com RLS:
+
+- move comandos novos para `WAITING_DEVICE`;
+- marca prazos vencidos como `EXPIRED`;
+- recupera comandos presos em `PROCESSING`;
+- agenda `RETRY_SCHEDULED` com backoff;
+- marca `FAILED` quando `max_attempts` é atingido;
+- encerra a tentativa travada e registra cada transição.
+
+Configuração:
+
+```env
+WORKER_INTERVAL=1s
+COMMAND_PROCESSING_TIMEOUT=5m
+COMMAND_RETRY_INTERVALS=30s,2m,10m
+```

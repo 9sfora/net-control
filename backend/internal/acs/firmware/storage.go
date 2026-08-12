@@ -60,3 +60,10 @@ func (s *Storage) Remove(path string) error {
 	}
 	return os.Remove(filepath.Join(s.root, filepath.Base(path)))
 }
+
+func (s *Storage) Open(path string) (*os.File, error) {
+	if path == "" || filepath.Base(path) != path {
+		return nil, os.ErrNotExist
+	}
+	return os.Open(filepath.Join(s.root, path))
+}

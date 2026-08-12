@@ -29,3 +29,22 @@ func TestParseCommandResult(t *testing.T) {
 		t.Fatalf("fault result = %+v, %v", result, err)
 	}
 }
+
+func TestDownload(t *testing.T) {
+	payload := string(Download(OutboundCommand{ID: "command-1", AttemptID: "attempt-1", Type: "UPDATE_FIRMWARE", Download: &DownloadRequest{URL: "https://acs.example/firmware?a=1&b=2", FileSize: 42, FileName: "router.bin"}}))
+	for _, expected := range []string{"cwmp:Download", "command-1", "attempt-1", "1 Firmware Upgrade Image", "https://acs.example/firmware?a=1&amp;b=2", "<FileSize>42</FileSize>", "router.bin"} {
+		if !strings.Contains(payload, expected) {
+			t.Fatalf("payload does not contain %q: %s", expected, payload)
+		}
+	}
+}
+
+func TestParseTransferComplete(t *testing.T) {
+	result, err := ParseCommandResult([]byte(`<Envelope><Body><TransferComplete><CommandKey>command-1</CommandKey><FaultStruct><FaultCode>0</FaultCode><FaultString></FaultString></FaultStruct></TransferComplete></Body></Envelope>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Kind != "TRANSFER_COMPLETE" || result.CommandKey != "command-1" || result.Fault {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+}

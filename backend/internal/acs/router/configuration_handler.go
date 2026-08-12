@@ -15,6 +15,7 @@ import (
 type ConfigurationStore interface {
 	SaveConfiguration(context.Context, string, string, DesiredConfiguration) (ConfigurationResult, error)
 	CreateActivationCommand(context.Context, string, string, string, string) (Command, error)
+	CreateFirmwareCommand(context.Context, string, string, string, string, string) (Command, error)
 }
 
 type Encryptor interface {
@@ -35,7 +36,7 @@ func (h *ConfigurationHandler) Register(mux *http.ServeMux) {
 	mux.Handle("PUT /api/v1/acs/routers/{id}/configuration",
 		auth.Authenticate(h.tokens, auth.RequirePermission("acs.router.update", http.HandlerFunc(h.save))))
 	mux.Handle("POST /api/v1/acs/routers/{id}/commands",
-		auth.Authenticate(h.tokens, auth.RequirePermission("acs.router.command.activate", http.HandlerFunc(h.activate))))
+		auth.Authenticate(h.tokens, http.HandlerFunc(h.createCommand)))
 }
 
 func (h *ConfigurationHandler) save(w http.ResponseWriter, r *http.Request) {
@@ -77,19 +78,30 @@ func (h *ConfigurationHandler) save(w http.ResponseWriter, r *http.Request) {
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"data": result})
 }
 
-func (h *ConfigurationHandler) activate(w http.ResponseWriter, r *http.Request) {
+func (h *ConfigurationHandler) createCommand(w http.ResponseWriter, r *http.Request) {
 	routerID := r.PathValue("id")
 	if !uuidPattern.MatchString(routerID) {
 		httpserver.WriteError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid router ID")
 		return
 	}
 	var input struct {
-		Type string `json:"type"`
+		Type       string `json:"type"`
+		FirmwareID string `json:"firmware_id"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&input); err != nil || input.Type != "ACTIVATE" {
-		httpserver.WriteError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "Command type must be ACTIVATE")
+	if err := decoder.Decode(&input); err != nil {
+		httpserver.WriteError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid request body")
+		return
+	}
+	input.Type = strings.ToUpper(strings.TrimSpace(input.Type))
+	input.FirmwareID = strings.TrimSpace(input.FirmwareID)
+	if input.Type != "ACTIVATE" && input.Type != "UPDATE_FIRMWARE" {
+		httpserver.WriteError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "Command type must be ACTIVATE or UPDATE_FIRMWARE")
+		return
+	}
+	if input.Type == "UPDATE_FIRMWARE" && !uuidPattern.MatchString(input.FirmwareID) {
+		httpserver.WriteError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "A valid firmware_id is required")
 		return
 	}
 	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
@@ -98,7 +110,21 @@ func (h *ConfigurationHandler) activate(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	principal, _ := auth.PrincipalFromContext(r.Context())
-	command, err := h.store.CreateActivationCommand(r.Context(), principal.TenantID, routerID, principal.UserID, idempotencyKey)
+	permission := "acs.router.command.activate"
+	if input.Type == "UPDATE_FIRMWARE" {
+		permission = "acs.router.command.update_firmware"
+	}
+	if !hasPermission(principal.Permissions, permission) {
+		httpserver.WriteError(w, r, http.StatusForbidden, "FORBIDDEN", "Permission denied")
+		return
+	}
+	var command Command
+	var err error
+	if input.Type == "ACTIVATE" {
+		command, err = h.store.CreateActivationCommand(r.Context(), principal.TenantID, routerID, principal.UserID, idempotencyKey)
+	} else {
+		command, err = h.store.CreateFirmwareCommand(r.Context(), principal.TenantID, routerID, principal.UserID, input.FirmwareID, idempotencyKey)
+	}
 	if errors.Is(err, ErrNotFound) {
 		httpserver.WriteError(w, r, http.StatusNotFound, "ACS_ROUTER_NOT_FOUND", "Router not found")
 		return
@@ -107,11 +133,24 @@ func (h *ConfigurationHandler) activate(w http.ResponseWriter, r *http.Request) 
 		httpserver.WriteError(w, r, http.StatusConflict, "ACS_ROUTER_CONFIGURATION_REQUIRED", "Router configuration is required before activation")
 		return
 	}
+	if errors.Is(err, ErrFirmwareUnavailable) {
+		httpserver.WriteError(w, r, http.StatusConflict, "ACS_FIRMWARE_UNAVAILABLE", "Firmware is not ready or is incompatible with the router")
+		return
+	}
 	if err != nil {
 		httpserver.WriteError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "Internal server error")
 		return
 	}
 	httpserver.WriteJSON(w, http.StatusAccepted, map[string]any{"data": command})
+}
+
+func hasPermission(permissions []string, expected string) bool {
+	for _, permission := range permissions {
+		if permission == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func validateConfiguration(configuration *DesiredConfiguration) string {

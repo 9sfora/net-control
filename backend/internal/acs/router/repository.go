@@ -20,6 +20,7 @@ var (
 	ErrInvalidHardware       = errors.New("hardware version is invalid")
 	ErrIncompatibleModel     = errors.New("router model is incompatible")
 	ErrIncompatibleHardware  = errors.New("hardware version is incompatible")
+	ErrFirmwareUnavailable   = errors.New("firmware is unavailable")
 )
 
 type Repository struct{ pool *pgxpool.Pool }
@@ -60,6 +61,50 @@ func (r *Repository) ListUnknown(ctx context.Context, tenantID string, limit, of
 		return rows.Err()
 	})
 	return items, err
+}
+
+func (r *Repository) CreateFirmwareCommand(ctx context.Context, tenantID, routerID, userID, firmwareID, idempotencyKey string) (Command, error) {
+	var command Command
+	err := database.InTenantTransaction(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		var compatible, routerExists bool
+		err := tx.QueryRow(ctx, `
+			SELECT EXISTS(
+				SELECT 1 FROM acs.routers r
+				JOIN acs.firmwares f ON f.tenant_id=r.tenant_id AND f.router_model_id=r.router_model_id
+				WHERE r.tenant_id=$1 AND r.id=$2 AND f.id=$3 AND f.active AND f.status='READY'
+				  AND (f.hardware_version_id IS NULL OR f.hardware_version_id=r.hardware_version_id)
+			), EXISTS(SELECT 1 FROM acs.routers WHERE tenant_id=$1 AND id=$2)`, tenantID, routerID, firmwareID).Scan(&compatible, &routerExists)
+		if err != nil {
+			return fmt.Errorf("validate firmware command: %w", err)
+		}
+		if !routerExists {
+			return ErrNotFound
+		}
+		if !compatible {
+			return ErrFirmwareUnavailable
+		}
+		parameters, _ := json.Marshal(map[string]string{"firmware_id": firmwareID})
+		var key any
+		if idempotencyKey != "" {
+			key = idempotencyKey
+		}
+		var encoded []byte
+		err = tx.QueryRow(ctx, `
+			INSERT INTO acs.router_commands(tenant_id,router_id,created_by,type,parameters,idempotency_key,priority)
+			VALUES($1,$2,$3,'UPDATE_FIRMWARE',$4,$5,'HIGH')
+			ON CONFLICT (tenant_id,idempotency_key) WHERE idempotency_key IS NOT NULL
+			DO UPDATE SET idempotency_key=EXCLUDED.idempotency_key
+			RETURNING id,router_id,type,status,priority,parameters,idempotency_key`, tenantID, routerID, userID, parameters, key).Scan(
+			&command.ID, &command.RouterID, &command.Type, &command.Status, &command.Priority, &encoded, &command.IdempotencyKey)
+		if err != nil {
+			return fmt.Errorf("create firmware command: %w", err)
+		}
+		if err := json.Unmarshal(encoded, &command.Parameters); err != nil {
+			return err
+		}
+		return nil
+	})
+	return command, err
 }
 
 func (r *Repository) Configure(ctx context.Context, tenantID, unknownID string, input ConfigureUnknownInput) (Router, error) {

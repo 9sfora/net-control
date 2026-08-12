@@ -259,3 +259,27 @@ FIRMWARE_MAX_FILE_SIZE=67108864
 ```
 
 No Compose, o diretório é persistido no volume `firmware_data` e compartilhado com o worker. As permissões usadas pelas rotas são `acs.firmware.read`, `acs.firmware.create` e `acs.firmware.upload`.
+
+## Atualização de firmware via CWMP
+
+Um firmware com status `READY` e compatível com o modelo e a versão de hardware do roteador pode ser enfileirado pela rota existente de comandos:
+
+```json
+{
+  "type": "UPDATE_FIRMWARE",
+  "firmware_id": "uuid-do-firmware"
+}
+```
+
+A rota exige `acs.router.command.update_firmware`. O comando recebe prioridade `HIGH` e também aceita `Idempotency-Key`.
+
+Durante a próxima sessão do equipamento, o ACS entrega um RPC `Download` com uma URL temporária no domínio configurado por `ACS_FQDN`. Essa URL usa a tentativa do comando como credencial bearer, só permite o firmware associado e deixa de funcionar quando o comando sai de `PROCESSING`.
+
+O ciclo de estados é:
+
+```text
+Inform → Download → DownloadResponse → transferência do arquivo
+       → TransferComplete → COMPLETED ou FAILED
+```
+
+`DownloadResponse` confirma apenas que o pedido foi aceito. O comando só é concluído após `TransferComplete`; em caso de sucesso, `software_version` do roteador é atualizado com a versão cadastrada no firmware. O download retorna `Content-Length` e `X-Checksum-SHA256` para permitir validação da imagem.

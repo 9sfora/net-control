@@ -94,7 +94,7 @@ func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/xml; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(SetParameterValues(command))
+	_, _ = w.Write(EncodeCommand(command))
 }
 
 func (h *Handler) complete(w http.ResponseWriter, r *http.Request, body []byte) {

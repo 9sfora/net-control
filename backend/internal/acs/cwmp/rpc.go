@@ -17,13 +17,48 @@ type OutboundCommand struct {
 	AttemptID  string
 	Type       string
 	Parameters []ParameterValue
+	Download   *DownloadRequest
+}
+
+type DownloadRequest struct {
+	URL      string
+	FileSize int64
+	FileName string
 }
 
 type CommandResult struct {
-	Fault       bool
-	FaultCode   string
-	FaultString string
-	Raw         string
+	Kind           string
+	CommandKey     string
+	TransferCode   string
+	ResponseStatus string
+	Fault          bool
+	FaultCode      string
+	FaultString    string
+	Raw            string
+}
+
+func EncodeCommand(command OutboundCommand) []byte {
+	if command.Type == "UPDATE_FIRMWARE" {
+		return Download(command)
+	}
+	return SetParameterValues(command)
+}
+
+func Download(command OutboundCommand) []byte {
+	var body bytes.Buffer
+	body.WriteString(`<?xml version="1.0" encoding="UTF-8"?>`)
+	body.WriteString(`<soap-env:Envelope xmlns:soap-env="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-2"><soap-env:Header><cwmp:ID soap-env:mustUnderstand="1">`)
+	escape(&body, command.AttemptID)
+	body.WriteString(`</cwmp:ID></soap-env:Header><soap-env:Body><cwmp:Download><CommandKey>`)
+	escape(&body, command.ID)
+	body.WriteString(`</CommandKey><FileType>1 Firmware Upgrade Image</FileType><URL>`)
+	escape(&body, command.Download.URL)
+	body.WriteString(`</URL><Username></Username><Password></Password><FileSize>`)
+	body.WriteString(fmt.Sprintf("%d", command.Download.FileSize))
+	body.WriteString(`</FileSize><TargetFileName>`)
+	escape(&body, command.Download.FileName)
+	body.WriteString(`</TargetFileName><DelaySeconds>0</DelaySeconds><SuccessURL></SuccessURL><FailureURL></FailureURL></cwmp:Download></soap-env:Body></soap-env:Envelope>`)
+	return body.Bytes()
 }
 
 func SetParameterValues(command OutboundCommand) []byte {
@@ -53,8 +88,18 @@ func SetParameterValues(command OutboundCommand) []byte {
 func ParseCommandResult(payload []byte) (CommandResult, error) {
 	var message struct {
 		Body struct {
-			Response *struct{} `xml:"SetParameterValuesResponse"`
-			Fault    *struct {
+			Response         *struct{} `xml:"SetParameterValuesResponse"`
+			DownloadResponse *struct {
+				Status string `xml:"Status"`
+			} `xml:"DownloadResponse"`
+			TransferComplete *struct {
+				CommandKey string `xml:"CommandKey"`
+				Fault      struct {
+					Code   string `xml:"FaultCode"`
+					String string `xml:"FaultString"`
+				} `xml:"FaultStruct"`
+			} `xml:"TransferComplete"`
+			Fault *struct {
 				Code   string `xml:"faultcode"`
 				String string `xml:"faultstring"`
 				Detail struct {
@@ -71,6 +116,20 @@ func ParseCommandResult(payload []byte) (CommandResult, error) {
 	}
 	result := CommandResult{Raw: string(payload)}
 	if message.Body.Response != nil {
+		result.Kind = "SET_PARAMETER_VALUES"
+		return result, nil
+	}
+	if message.Body.DownloadResponse != nil {
+		result.Kind = "DOWNLOAD_ACCEPTED"
+		result.ResponseStatus = message.Body.DownloadResponse.Status
+		return result, nil
+	}
+	if message.Body.TransferComplete != nil {
+		result.Kind = "TRANSFER_COMPLETE"
+		result.CommandKey = message.Body.TransferComplete.CommandKey
+		result.TransferCode = message.Body.TransferComplete.Fault.Code
+		result.FaultString = message.Body.TransferComplete.Fault.String
+		result.Fault = result.TransferCode != "" && result.TransferCode != "0"
 		return result, nil
 	}
 	if message.Body.Fault != nil {

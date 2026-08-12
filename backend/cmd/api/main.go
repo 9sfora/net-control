@@ -54,8 +54,10 @@ func main() {
 	commandHandler := acscommand.NewHandler(acscommand.NewRepository(db), tokens)
 	dashboardHandler := dashboard.NewHandler(dashboard.NewRepository(db), tokens, cfg.ACSOnlineTimeout, cfg.ACSOfflineTimeout)
 	catalogHandler := catalog.NewHandler(catalog.NewRepository(db), tokens)
-	firmwareHandler := firmware.NewHandler(firmware.NewRepository(db), firmware.NewStorage(cfg.FirmwareStoragePath, cfg.FirmwareMaxFileSize), tokens)
-	cwmpDispatcher := cwmp.NewDispatcher(db, cfg.ACSDefaultTenantSlug, wifiCipher)
+	firmwareStorage := firmware.NewStorage(cfg.FirmwareStoragePath, cfg.FirmwareMaxFileSize)
+	firmwareHandler := firmware.NewHandler(firmware.NewRepository(db), firmwareStorage, tokens)
+	firmwareDeliveryHandler := firmware.NewDeliveryHandler(db, cfg.ACSDefaultTenantSlug, firmwareStorage)
+	cwmpDispatcher := cwmp.NewDispatcher(db, cfg.ACSDefaultTenantSlug, wifiCipher, "https://"+cfg.ACSFQDN)
 	cwmpHandler := cwmp.NewHandler(cwmp.NewRepository(db, cfg.ACSDefaultTenantSlug), cwmpDispatcher, logger)
 	hosts := httpserver.VirtualHosts{Application: cfg.ApplicationFQDN, ACS: cfg.ACSFQDN}
 	registerApplication := func(mux *http.ServeMux) {
@@ -68,7 +70,8 @@ func main() {
 		catalogHandler.Register(mux)
 		firmwareHandler.Register(mux)
 	}
-	server := httpserver.New(cfg.HTTPAddress, hosts, db, logger, registerApplication, cwmpHandler.Register)
+	registerACS := func(mux *http.ServeMux) { cwmpHandler.Register(mux); firmwareDeliveryHandler.Register(mux) }
+	server := httpserver.New(cfg.HTTPAddress, hosts, db, logger, registerApplication, registerACS)
 	serverErrors := make(chan error, 1)
 	go func() { serverErrors <- server.ListenAndServe() }()
 	logger.Info("api started", "address", cfg.HTTPAddress, "environment", cfg.Environment)

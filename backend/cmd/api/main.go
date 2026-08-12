@@ -13,6 +13,7 @@ import (
 	acscommand "github.com/charlesduarte/net-control/backend/internal/acs/command"
 	"github.com/charlesduarte/net-control/backend/internal/acs/cwmp"
 	"github.com/charlesduarte/net-control/backend/internal/acs/dashboard"
+	"github.com/charlesduarte/net-control/backend/internal/acs/firmware"
 	acsrouter "github.com/charlesduarte/net-control/backend/internal/acs/router"
 	"github.com/charlesduarte/net-control/backend/internal/core/auth"
 	"github.com/charlesduarte/net-control/backend/internal/platform/config"
@@ -53,6 +54,7 @@ func main() {
 	commandHandler := acscommand.NewHandler(acscommand.NewRepository(db), tokens)
 	dashboardHandler := dashboard.NewHandler(dashboard.NewRepository(db), tokens, cfg.ACSOnlineTimeout, cfg.ACSOfflineTimeout)
 	catalogHandler := catalog.NewHandler(catalog.NewRepository(db), tokens)
+	firmwareHandler := firmware.NewHandler(firmware.NewRepository(db), firmware.NewStorage(cfg.FirmwareStoragePath, cfg.FirmwareMaxFileSize), tokens)
 	cwmpDispatcher := cwmp.NewDispatcher(db, cfg.ACSDefaultTenantSlug, wifiCipher)
 	cwmpHandler := cwmp.NewHandler(cwmp.NewRepository(db, cfg.ACSDefaultTenantSlug), cwmpDispatcher, logger)
 	hosts := httpserver.VirtualHosts{Application: cfg.ApplicationFQDN, ACS: cfg.ACSFQDN}
@@ -64,6 +66,7 @@ func main() {
 		commandHandler.Register(mux)
 		dashboardHandler.Register(mux)
 		catalogHandler.Register(mux)
+		firmwareHandler.Register(mux)
 	}
 	server := httpserver.New(cfg.HTTPAddress, hosts, db, logger, registerApplication, cwmpHandler.Register)
 	serverErrors := make(chan error, 1)

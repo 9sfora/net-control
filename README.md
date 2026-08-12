@@ -217,3 +217,45 @@ Permissões:
 acs.catalog.read
 acs.catalog.manage
 ```
+
+## Catálogo de firmware
+
+O firmware é criado primeiro como metadado e fica com status `NO_FILE`. O arquivo é enviado depois por `multipart/form-data`; após o armazenamento e cálculo do SHA-256, o status passa para `READY`.
+
+```text
+GET  /api/v1/acs/firmwares?router_model_id={uuid}
+GET  /api/v1/acs/firmwares/{id}
+POST /api/v1/acs/firmwares
+POST /api/v1/acs/firmwares/{id}/file
+```
+
+Exemplo de cadastro:
+
+```json
+{
+  "router_model_id": "uuid-do-modelo",
+  "hardware_version_id": "uuid-da-versao-opcional",
+  "name": "Firmware estável",
+  "version": "1.2.0",
+  "release_notes": "Correções de estabilidade",
+  "is_default": true
+}
+```
+
+Upload do campo `file`:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/acs/firmwares/{id}/file \
+  -H 'Host: localhost' \
+  -H 'Authorization: Bearer <token>' \
+  -F 'file=@firmware.bin'
+```
+
+Os arquivos recebem um nome interno baseado no UUID do firmware; o nome enviado pelo cliente é apenas metadado. O upload é transmitido diretamente ao armazenamento, sem carregar o binário inteiro na memória, e registra tamanho e checksum SHA-256.
+
+```env
+FIRMWARE_STORAGE_PATH=/var/lib/netcontrol/firmwares
+FIRMWARE_MAX_FILE_SIZE=67108864
+```
+
+No Compose, o diretório é persistido no volume `firmware_data` e compartilhado com o worker. As permissões usadas pelas rotas são `acs.firmware.read`, `acs.firmware.create` e `acs.firmware.upload`.

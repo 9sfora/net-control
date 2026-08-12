@@ -26,6 +26,8 @@ type Config struct {
 	CommandRetryIntervals    []time.Duration
 	ACSOnlineTimeout         time.Duration
 	ACSOfflineTimeout        time.Duration
+	FirmwareStoragePath      string
+	FirmwareMaxFileSize      int64
 }
 
 func Load() (Config, error) {
@@ -44,6 +46,8 @@ func Load() (Config, error) {
 		CommandProcessingTimeout: duration("COMMAND_PROCESSING_TIMEOUT", 5*time.Minute),
 		ACSOnlineTimeout:         duration("ACS_ONLINE_TIMEOUT", 10*time.Minute),
 		ACSOfflineTimeout:        duration("ACS_OFFLINE_TIMEOUT", 24*time.Hour),
+		FirmwareStoragePath:      value("FIRMWARE_STORAGE_PATH", "/var/lib/netcontrol/firmwares"),
+		FirmwareMaxFileSize:      int64Value("FIRMWARE_MAX_FILE_SIZE", 64<<20),
 	}
 
 	if cfg.DatabaseURL == "" {
@@ -87,8 +91,23 @@ func Load() (Config, error) {
 	if cfg.ACSOnlineTimeout <= 0 || cfg.ACSOfflineTimeout <= cfg.ACSOnlineTimeout {
 		return Config{}, errors.New("ACS timeouts must be positive and ACS_OFFLINE_TIMEOUT must exceed ACS_ONLINE_TIMEOUT")
 	}
+	if cfg.FirmwareStoragePath == "" || cfg.FirmwareMaxFileSize <= 0 {
+		return Config{}, errors.New("firmware storage path and maximum file size are required")
+	}
 
 	return cfg, nil
+}
+
+func int64Value(key string, fallback int64) int64 {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return -1
+	}
+	return parsed
 }
 
 func durations(key, fallback string) ([]time.Duration, error) {

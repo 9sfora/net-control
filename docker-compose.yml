@@ -45,11 +45,15 @@ services:
       COMMAND_RETRY_INTERVALS: ${COMMAND_RETRY_INTERVALS:-30s,2m,10m}
       ACS_ONLINE_TIMEOUT: ${ACS_ONLINE_TIMEOUT:-10m}
       ACS_OFFLINE_TIMEOUT: ${ACS_OFFLINE_TIMEOUT:-24h}
+      FIRMWARE_STORAGE_PATH: /var/lib/netcontrol/firmwares
+      FIRMWARE_MAX_FILE_SIZE: ${FIRMWARE_MAX_FILE_SIZE:-67108864}
     depends_on:
       migrate:
         condition: service_completed_successfully
     ports:
       - "8080:8080"
+    volumes:
+      - firmware_data:/var/lib/netcontrol/firmwares
 
   worker:
     build:
@@ -67,9 +71,13 @@ services:
       COMMAND_RETRY_INTERVALS: ${COMMAND_RETRY_INTERVALS:-30s,2m,10m}
       ACS_ONLINE_TIMEOUT: ${ACS_ONLINE_TIMEOUT:-10m}
       ACS_OFFLINE_TIMEOUT: ${ACS_OFFLINE_TIMEOUT:-24h}
+      FIRMWARE_STORAGE_PATH: /var/lib/netcontrol/firmwares
+      FIRMWARE_MAX_FILE_SIZE: ${FIRMWARE_MAX_FILE_SIZE:-67108864}
     depends_on:
       migrate:
         condition: service_completed_successfully
+    volumes:
+      - firmware_data:/var/lib/netcontrol/firmwares
 
   bootstrap:
     profiles: ["tools"]
@@ -90,3 +98,4 @@ services:
 
 volumes:
   postgres_data:
+  firmware_data:

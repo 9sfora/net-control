@@ -58,7 +58,7 @@ func main() {
 	firmwareHandler := firmware.NewHandler(firmware.NewRepository(db), firmwareStorage, tokens)
 	firmwareDeliveryHandler := firmware.NewDeliveryHandler(db, cfg.ACSDefaultTenantSlug, firmwareStorage)
 	cwmpDispatcher := cwmp.NewDispatcher(db, cfg.ACSDefaultTenantSlug, wifiCipher, "https://"+cfg.ACSFQDN)
-	cwmpHandler := cwmp.NewHandler(cwmp.NewRepository(db, cfg.ACSDefaultTenantSlug), cwmpDispatcher, logger)
+	cwmpHandler := cwmp.NewHandler(cwmp.NewRepository(db, cfg.ACSDefaultTenantSlug), cwmpDispatcher, logger, cfg.ACSCookieSecure)
 	hosts := httpserver.VirtualHosts{Application: cfg.ApplicationFQDN, ACS: cfg.ACSFQDN}
 	registerApplication := func(mux *http.ServeMux) {
 		authHandler.Register(mux)

@@ -25,13 +25,14 @@ type CommandDispatcher interface {
 }
 
 type Handler struct {
-	repository InformRecorder
-	dispatcher CommandDispatcher
-	logger     *slog.Logger
+	repository   InformRecorder
+	dispatcher   CommandDispatcher
+	logger       *slog.Logger
+	cookieSecure bool
 }
 
-func NewHandler(repository InformRecorder, dispatcher CommandDispatcher, logger *slog.Logger) *Handler {
-	return &Handler{repository: repository, dispatcher: dispatcher, logger: logger}
+func NewHandler(repository InformRecorder, dispatcher CommandDispatcher, logger *slog.Logger, cookieSecure bool) *Handler {
+	return &Handler{repository: repository, dispatcher: dispatcher, logger: logger, cookieSecure: cookieSecure}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -70,7 +71,7 @@ func (h *Handler) cwmp(w http.ResponseWriter, r *http.Request) {
 	h.logger.InfoContext(r.Context(), "CWMP Inform received", "session_id", reception.SessionID,
 		"known_router", reception.Known, "oui", inform.OUI, "product_class", inform.ProductClass,
 		"serial_number", inform.SerialNumber)
-	http.SetCookie(w, &http.Cookie{Name: "ACS_SESSION", Value: reception.SessionID, Path: "/cwmp", HttpOnly: true, Secure: true})
+	http.SetCookie(w, &http.Cookie{Name: "ACS_SESSION", Value: reception.SessionID, Path: "/cwmp", HttpOnly: true, Secure: h.cookieSecure})
 	w.Header().Set("Content-Type", "text/xml; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(InformResponse(inform.ID))

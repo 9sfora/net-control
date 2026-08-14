@@ -21,7 +21,7 @@ func (f *fakeRecorder) RecordInform(_ context.Context, inform Inform, _, _ strin
 
 func TestHandlerReceivesInform(t *testing.T) {
 	repository := &fakeRecorder{}
-	handler := NewHandler(repository, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	handler := NewHandler(repository, nil, slog.New(slog.NewTextHandler(io.Discard, nil)), false)
 	mux := http.NewServeMux()
 	handler.Register(mux)
 	request := httptest.NewRequest(http.MethodPost, "/cwmp", strings.NewReader(sampleInform))
@@ -38,5 +38,8 @@ func TestHandlerReceivesInform(t *testing.T) {
 	}
 	if len(response.Result().Cookies()) != 1 || response.Result().Cookies()[0].Value != "session-id" {
 		t.Fatal("ACS session cookie was not set")
+	}
+	if response.Result().Cookies()[0].Secure {
+		t.Fatal("ACS session cookie should allow HTTP in this test")
 	}
 }

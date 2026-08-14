@@ -21,6 +21,7 @@ type Config struct {
 	ApplicationFQDN          string
 	ACSFQDN                  string
 	ACSDefaultTenantSlug     string
+	ACSCookieSecure          bool
 	WiFiEncryptionKey        string
 	CommandProcessingTimeout time.Duration
 	CommandRetryIntervals    []time.Duration
@@ -42,6 +43,7 @@ func Load() (Config, error) {
 		ApplicationFQDN:          strings.ToLower(strings.TrimSpace(os.Getenv("APPLICATION_FQDN"))),
 		ACSFQDN:                  strings.ToLower(strings.TrimSpace(os.Getenv("ACS_FQDN"))),
 		ACSDefaultTenantSlug:     strings.ToLower(strings.TrimSpace(os.Getenv("ACS_DEFAULT_TENANT_SLUG"))),
+		ACSCookieSecure:          boolean("ACS_COOKIE_SECURE", true),
 		WiFiEncryptionKey:        os.Getenv("WIFI_ENCRYPTION_KEY"),
 		CommandProcessingTimeout: duration("COMMAND_PROCESSING_TIMEOUT", 5*time.Minute),
 		ACSOnlineTimeout:         duration("ACS_ONLINE_TIMEOUT", 10*time.Minute),
@@ -77,6 +79,11 @@ func Load() (Config, error) {
 	if !validSlug(cfg.ACSDefaultTenantSlug) {
 		return Config{}, errors.New("ACS_DEFAULT_TENANT_SLUG must contain lowercase letters, numbers and hyphens")
 	}
+	if raw := os.Getenv("ACS_COOKIE_SECURE"); raw != "" {
+		if _, err := strconv.ParseBool(raw); err != nil {
+			return Config{}, errors.New("ACS_COOKIE_SECURE must be true or false")
+		}
+	}
 	if key, err := base64.StdEncoding.DecodeString(cfg.WiFiEncryptionKey); err != nil || len(key) != 32 {
 		return Config{}, errors.New("WIFI_ENCRYPTION_KEY must be a base64-encoded 32-byte key")
 	}
@@ -96,6 +103,15 @@ func Load() (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func boolean(key string, fallback bool) bool {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback
+	}
+	parsed, _ := strconv.ParseBool(raw)
+	return parsed
 }
 
 func int64Value(key string, fallback int64) int64 {

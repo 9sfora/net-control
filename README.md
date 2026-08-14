@@ -56,9 +56,12 @@ O mesmo processo atende dois hosts lógicos, configurados sem protocolo ou camin
 APPLICATION_FQDN=net-control.dominio.com
 ACS_FQDN=acs.dominio.com
 ACS_DEFAULT_TENANT_SLUG=netcontrol
+ACS_COOKIE_SECURE=true
 ```
 
 O host da aplicação expõe a API administrativa autenticada. O host ACS será exclusivo para sessões iniciadas pelos equipamentos. Requisições para hosts desconhecidos recebem `421`, e rotas administrativas não existem no host ACS.
+
+`ACS_COOKIE_SECURE` deve permanecer `true` quando o ACS usa HTTPS. Somente para testes locais por HTTP, defina `false`; isso permite que o CPE devolva o cookie usado para continuar a sessão CWMP e buscar comandos.
 
 O endpoint inicial dos equipamentos é `POST /cwmp`. O slug padrão associa essa URL fixa ao tenant responsável pelos equipamentos descobertos. Um `Inform` válido cria ou atualiza a entrada em `acs.unknown_routers`; se a identidade já existir em `acs.routers`, atualiza o equipamento configurado. Cada `Inform` também abre um registro em `acs.router_sessions`.
 

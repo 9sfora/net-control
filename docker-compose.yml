@@ -38,8 +38,9 @@ services:
       HTTP_ADDRESS: :8080
       AUTH_TOKEN_SECRET: ${AUTH_TOKEN_SECRET:-development-only-secret-change-me-now}
       APPLICATION_FQDN: ${APPLICATION_FQDN:-localhost}
-      ACS_FQDN: ${ACS_FQDN:-acs.localhost}
+      ACS_FQDN: ${ACS_FQDN:-187.19.219.19}
       ACS_DEFAULT_TENANT_SLUG: ${ACS_DEFAULT_TENANT_SLUG:-netcontrol}
+      ACS_COOKIE_SECURE: ${ACS_COOKIE_SECURE:-true}
       WIFI_ENCRYPTION_KEY: ${WIFI_ENCRYPTION_KEY:-MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
       COMMAND_PROCESSING_TIMEOUT: ${COMMAND_PROCESSING_TIMEOUT:-5m}
       COMMAND_RETRY_INTERVALS: ${COMMAND_RETRY_INTERVALS:-30s,2m,10m}
@@ -53,7 +54,7 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - firmware_data:/var/lib/netcontrol/firmwares
+      - ./firmware_data:/var/lib/netcontrol/firmwares
 
   worker:
     build:
@@ -64,8 +65,9 @@ services:
       DATABASE_URL: postgres://netcontrol_app:netcontrol_app@postgres:5432/netcontrol?sslmode=disable
       AUTH_TOKEN_SECRET: ${AUTH_TOKEN_SECRET:-development-only-secret-change-me-now}
       APPLICATION_FQDN: ${APPLICATION_FQDN:-localhost}
-      ACS_FQDN: ${ACS_FQDN:-acs.localhost}
+      ACS_FQDN: ${ACS_FQDN:-187.19.219.19}
       ACS_DEFAULT_TENANT_SLUG: ${ACS_DEFAULT_TENANT_SLUG:-netcontrol}
+      ACS_COOKIE_SECURE: ${ACS_COOKIE_SECURE:-true}
       WIFI_ENCRYPTION_KEY: ${WIFI_ENCRYPTION_KEY:-MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
       COMMAND_PROCESSING_TIMEOUT: ${COMMAND_PROCESSING_TIMEOUT:-5m}
       COMMAND_RETRY_INTERVALS: ${COMMAND_RETRY_INTERVALS:-30s,2m,10m}
@@ -77,7 +79,7 @@ services:
       migrate:
         condition: service_completed_successfully
     volumes:
-      - firmware_data:/var/lib/netcontrol/firmwares
+      - ./firmware_data:/var/lib/netcontrol/firmwares
 
   bootstrap:
     profiles: ["tools"]

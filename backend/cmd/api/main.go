@@ -55,7 +55,7 @@ func main() {
 	dashboardHandler := dashboard.NewHandler(dashboard.NewRepository(db), tokens, cfg.ACSOnlineTimeout, cfg.ACSOfflineTimeout)
 	catalogHandler := catalog.NewHandler(catalog.NewRepository(db), tokens)
 	firmwareStorage := firmware.NewStorage(cfg.FirmwareStoragePath, cfg.FirmwareMaxFileSize)
-	firmwareHandler := firmware.NewHandler(firmware.NewRepository(db), firmwareStorage, tokens)
+	firmwareHandler := firmware.NewHandler(firmware.NewRepository(db), firmwareStorage, tokens, logger)
 	firmwareDeliveryHandler := firmware.NewDeliveryHandler(db, cfg.ACSDefaultTenantSlug, firmwareStorage)
 	cwmpDispatcher := cwmp.NewDispatcher(db, cfg.ACSDefaultTenantSlug, wifiCipher, "https://"+cfg.ACSFQDN)
 	cwmpHandler := cwmp.NewHandler(cwmp.NewRepository(db, cfg.ACSDefaultTenantSlug), cwmpDispatcher, logger, cfg.ACSCookieSecure)

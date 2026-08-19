@@ -28,6 +28,13 @@ services:
     volumes:
       - ./postgres/migrations:/migrations:ro
 
+  firmware-storage-init:
+    image: alpine
+    user: "0:0"
+    command: ["sh", "-c", "chown -R 65532:65532 /var/lib/netcontrol/firmwares && chmod 750 /var/lib/netcontrol/firmwares"]
+    volumes:
+      - firmware_data:/var/lib/netcontrol/firmwares
+
   backend:
     build:
       context: .
@@ -51,10 +58,12 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+      firmware-storage-init:
+        condition: service_completed_successfully
     ports:
       - "8080:8080"
     volumes:
-      - ./firmware_data:/var/lib/netcontrol/firmwares
+      - firmware_data:/var/lib/netcontrol/firmwares
 
   frontend:
     build:
@@ -86,8 +95,10 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+      firmware-storage-init:
+        condition: service_completed_successfully
     volumes:
-      - ./firmware_data:/var/lib/netcontrol/firmwares
+      - firmware_data:/var/lib/netcontrol/firmwares
 
   bootstrap:
     profiles: ["tools"]

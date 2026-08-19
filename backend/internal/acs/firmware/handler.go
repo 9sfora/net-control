@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -39,10 +40,11 @@ type Handler struct {
 	store   Store
 	storage FileStorage
 	tokens  *auth.TokenManager
+	logger  *slog.Logger
 }
 
-func NewHandler(store Store, storage FileStorage, tokens *auth.TokenManager) *Handler {
-	return &Handler{store: store, storage: storage, tokens: tokens}
+func NewHandler(store Store, storage FileStorage, tokens *auth.TokenManager, logger *slog.Logger) *Handler {
+	return &Handler{store: store, storage: storage, tokens: tokens, logger: logger}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -73,7 +75,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	principal, _ := auth.PrincipalFromContext(r.Context())
 	items, err := h.store.List(r.Context(), principal.TenantID, modelID)
 	if err != nil {
-		internal(w, r)
+		h.internal(w, r, "list firmware", err)
 		return
 	}
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"data": items})
@@ -86,7 +88,7 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	}
 	principal, _ := auth.PrincipalFromContext(r.Context())
 	item, err := h.store.Get(r.Context(), principal.TenantID, id)
-	if writeError(w, r, err) {
+	if h.writeError(w, r, "get firmware", err) {
 		return
 	}
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"data": item})
@@ -135,7 +137,7 @@ func (h *Handler) save(w http.ResponseWriter, r *http.Request, id string) {
 	} else {
 		item, err = h.store.Update(r.Context(), principal.TenantID, id, input)
 	}
-	if writeError(w, r, err) {
+	if h.writeError(w, r, "save firmware metadata", err) {
 		return
 	}
 	status := http.StatusOK
@@ -152,11 +154,11 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 	}
 	principal, _ := auth.PrincipalFromContext(r.Context())
 	path, err := h.store.Delete(r.Context(), principal.TenantID, id)
-	if writeError(w, r, err) {
+	if h.writeError(w, r, "delete firmware metadata", err) {
 		return
 	}
 	if err := h.storage.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		internal(w, r)
+		h.internal(w, r, "remove firmware file", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -169,7 +171,7 @@ func (h *Handler) download(w http.ResponseWriter, r *http.Request) {
 	}
 	principal, _ := auth.PrincipalFromContext(r.Context())
 	item, err := h.store.Get(r.Context(), principal.TenantID, id)
-	if writeError(w, r, err) {
+	if h.writeError(w, r, "get firmware for download", err) {
 		return
 	}
 	if item.Status != "READY" || item.FileName == nil {
@@ -182,7 +184,7 @@ func (h *Handler) download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		internal(w, r)
+		h.internal(w, r, "open firmware file", err)
 		return
 	}
 	defer file.Close()
@@ -203,7 +205,7 @@ func (h *Handler) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	principal, _ := auth.PrincipalFromContext(r.Context())
-	if writeError(w, r, h.store.Exists(r.Context(), principal.TenantID, id)) {
+	if h.writeError(w, r, "validate firmware upload", h.store.Exists(r.Context(), principal.TenantID, id)) {
 		return
 	}
 	reader, err := r.MultipartReader()
@@ -237,13 +239,18 @@ func (h *Handler) upload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if saveErr != nil {
-			internal(w, r)
+			h.logger.ErrorContext(r.Context(), "firmware request failed", "operation", "store uploaded firmware", "request_id", httpserver.RequestID(r.Context()), "error", saveErr)
+			if errors.Is(saveErr, os.ErrPermission) {
+				httpserver.WriteError(w, r, http.StatusServiceUnavailable, "FIRMWARE_STORAGE_NOT_WRITABLE", "Firmware storage is not writable; verify the server storage permissions")
+				return
+			}
+			httpserver.WriteError(w, r, http.StatusServiceUnavailable, "FIRMWARE_STORAGE_UNAVAILABLE", "Firmware storage is temporarily unavailable")
 			return
 		}
 		item, attachErr := h.store.Attach(r.Context(), principal.TenantID, id, name, stored)
 		if attachErr != nil {
 			_ = h.storage.Remove(stored.Path)
-			writeError(w, r, attachErr)
+			h.writeError(w, r, "attach uploaded firmware", attachErr)
 			return
 		}
 		httpserver.WriteJSON(w, http.StatusOK, map[string]any{"data": item})
@@ -262,10 +269,11 @@ func validID(w http.ResponseWriter, r *http.Request, id string) bool {
 func validation(w http.ResponseWriter, r *http.Request, message string) {
 	httpserver.WriteError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", message)
 }
-func internal(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) internal(w http.ResponseWriter, r *http.Request, operation string, err error) {
+	h.logger.ErrorContext(r.Context(), "firmware request failed", "operation", operation, "request_id", httpserver.RequestID(r.Context()), "error", err)
 	httpserver.WriteError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "Internal server error")
 }
-func writeError(w http.ResponseWriter, r *http.Request, err error) bool {
+func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, operation string, err error) bool {
 	if err == nil {
 		return false
 	}
@@ -279,7 +287,7 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) bool {
 	case errors.Is(err, ErrImmutable):
 		httpserver.WriteError(w, r, http.StatusConflict, "FIRMWARE_IMMUTABLE", "Firmware cannot be changed after a file is uploaded")
 	default:
-		internal(w, r)
+		h.internal(w, r, operation, err)
 	}
 	return true
 }

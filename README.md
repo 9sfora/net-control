@@ -17,6 +17,18 @@ curl -H 'Host: localhost' http://localhost:8080/health
 curl -H 'Host: localhost' http://localhost:8080/ready
 ```
 
+O painel web fica disponível em `http://localhost:3000`. Ele inclui login, dashboard e as áreas de roteadores, descoberta, comandos, catálogo e firmwares. Os itens de navegação são exibidos conforme as permissões retornadas pela API.
+
+Para desenvolver somente o frontend (requer Node.js 22+):
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+O servidor de desenvolvimento abre em `http://localhost:5173` e encaminha chamadas `/api` para o backend local.
+
 Para executar os testes Go diretamente:
 
 ```bash

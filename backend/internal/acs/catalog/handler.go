@@ -18,9 +18,11 @@ var ouiPattern = regexp.MustCompile(`^[0-9A-F]{6}$`)
 type Store interface {
 	ListManufacturers(context.Context, string, string) ([]Manufacturer, error)
 	SaveManufacturer(context.Context, string, string, ManufacturerInput) (Manufacturer, error)
+	DeleteManufacturer(context.Context, string, string) error
 	ListModels(context.Context, string, string, string) ([]RouterModel, error)
 	GetModel(context.Context, string, string) (RouterModel, error)
 	SaveModel(context.Context, string, string, RouterModelInput) (RouterModel, error)
+	DeleteModel(context.Context, string, string) error
 	SaveHardwareVersion(context.Context, string, string, string, HardwareVersionInput) (HardwareVersion, error)
 	ListCWMPParameters(context.Context, string, string) ([]CWMPParameter, error)
 	ReplaceCWMPParameters(context.Context, string, string, []CWMPParameterInput) ([]CWMPParameter, error)
@@ -43,10 +45,12 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/acs/manufacturers", read(http.HandlerFunc(h.listManufacturers)))
 	mux.Handle("POST /api/v1/acs/manufacturers", manage(http.HandlerFunc(h.createManufacturer)))
 	mux.Handle("PUT /api/v1/acs/manufacturers/{id}", manage(http.HandlerFunc(h.updateManufacturer)))
+	mux.Handle("DELETE /api/v1/acs/manufacturers/{id}", manage(http.HandlerFunc(h.deleteManufacturer)))
 	mux.Handle("GET /api/v1/acs/router-models", read(http.HandlerFunc(h.listModels)))
 	mux.Handle("GET /api/v1/acs/router-models/{id}", read(http.HandlerFunc(h.getModel)))
 	mux.Handle("POST /api/v1/acs/router-models", manage(http.HandlerFunc(h.createModel)))
 	mux.Handle("PUT /api/v1/acs/router-models/{id}", manage(http.HandlerFunc(h.updateModel)))
+	mux.Handle("DELETE /api/v1/acs/router-models/{id}", manage(http.HandlerFunc(h.deleteModel)))
 	mux.Handle("POST /api/v1/acs/router-models/{id}/hardware-versions", manage(http.HandlerFunc(h.createHardware)))
 	mux.Handle("PUT /api/v1/acs/router-models/{id}/hardware-versions/{version_id}", manage(http.HandlerFunc(h.updateHardware)))
 	mux.Handle("GET /api/v1/acs/router-models/{id}/cwmp-parameters", read(http.HandlerFunc(h.listCWMPParameters)))
@@ -132,6 +136,17 @@ func (h *Handler) saveManufacturer(w http.ResponseWriter, r *http.Request, id st
 		status = http.StatusCreated
 	}
 	httpserver.WriteJSON(w, status, map[string]any{"data": item})
+}
+func (h *Handler) deleteManufacturer(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validID(w, r, id) {
+		return
+	}
+	p, _ := auth.PrincipalFromContext(r.Context())
+	if writeCatalogError(w, r, h.store.DeleteManufacturer(r.Context(), p.TenantID, id)) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 func (h *Handler) listModels(w http.ResponseWriter, r *http.Request) {
 	manufacturerID := strings.TrimSpace(r.URL.Query().Get("manufacturer_id"))
@@ -219,6 +234,17 @@ func (h *Handler) saveModel(w http.ResponseWriter, r *http.Request, id string) {
 	}
 	httpserver.WriteJSON(w, status, map[string]any{"data": item})
 }
+func (h *Handler) deleteModel(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validID(w, r, id) {
+		return
+	}
+	p, _ := auth.PrincipalFromContext(r.Context())
+	if writeCatalogError(w, r, h.store.DeleteModel(r.Context(), p.TenantID, id)) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
 func (h *Handler) createHardware(w http.ResponseWriter, r *http.Request) {
 	modelID := r.PathValue("id")
 	if !validID(w, r, modelID) {
@@ -290,6 +316,10 @@ func writeCatalogError(w http.ResponseWriter, r *http.Request, err error) bool {
 	}
 	if errors.Is(err, ErrInvalidReference) {
 		validation(w, r, "Referenced catalog item does not exist")
+		return true
+	}
+	if errors.Is(err, ErrInUse) {
+		httpserver.WriteError(w, r, http.StatusConflict, "ACS_CATALOG_IN_USE", "Catalog item is in use and cannot be deleted")
 		return true
 	}
 	internal(w, r)

@@ -16,6 +16,7 @@ var (
 	ErrNotFound         = errors.New("catalog item not found")
 	ErrConflict         = errors.New("catalog item already exists")
 	ErrInvalidReference = errors.New("invalid catalog reference")
+	ErrInUse            = errors.New("catalog item is in use")
 )
 
 type Repository struct{ pool *pgxpool.Pool }
@@ -58,6 +59,19 @@ func (r *Repository) SaveManufacturer(ctx context.Context, tenantID, id string, 
 		return catalogError(err)
 	})
 	return item, err
+}
+
+func (r *Repository) DeleteManufacturer(ctx context.Context, tenantID, id string) error {
+	return database.InTenantTransaction(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		result, err := tx.Exec(ctx, `DELETE FROM acs.manufacturers WHERE tenant_id=$1 AND id=$2`, tenantID, id)
+		if err != nil {
+			return deleteCatalogError(err)
+		}
+		if result.RowsAffected() == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
 }
 
 func (r *Repository) ListModels(ctx context.Context, tenantID, search, manufacturerID string) ([]RouterModel, error) {
@@ -152,6 +166,19 @@ func (r *Repository) SaveModel(ctx context.Context, tenantID, id string, input R
 		return err
 	})
 	return item, err
+}
+
+func (r *Repository) DeleteModel(ctx context.Context, tenantID, id string) error {
+	return database.InTenantTransaction(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		result, err := tx.Exec(ctx, `DELETE FROM acs.router_models WHERE tenant_id=$1 AND id=$2`, tenantID, id)
+		if err != nil {
+			return deleteCatalogError(err)
+		}
+		if result.RowsAffected() == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
 }
 
 func (r *Repository) ListCWMPParameters(ctx context.Context, tenantID, modelID string) ([]CWMPParameter, error) {
@@ -269,6 +296,17 @@ func catalogError(err error) error {
 	}
 	if err != nil {
 		return fmt.Errorf("catalog persistence: %w", err)
+	}
+	return nil
+}
+
+func deleteCatalogError(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+		return ErrInUse
+	}
+	if err != nil {
+		return fmt.Errorf("delete catalog item: %w", err)
 	}
 	return nil
 }

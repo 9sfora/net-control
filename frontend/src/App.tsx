@@ -1,5 +1,5 @@
 import { FormEvent, ReactNode, useCallback, useEffect, useState } from 'react'
-import { Activity, Boxes, ChevronRight, CircleGauge, Command, Cpu, Download, Edit3, LogOut, Menu, PackageOpen, Plus, RefreshCw, Router, Search, Trash2, Upload, Wifi, X } from 'lucide-react'
+import { Activity, Boxes, ChevronRight, CircleGauge, Command, Cpu, Download, Edit3, Info, LogOut, Menu, PackageOpen, Plus, RefreshCw, Router, Search, Star, Trash2, Upload, Wifi, X } from 'lucide-react'
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { api, ApiError, auth, downloadFile, formatDate, label, type Principal } from './api'
 
@@ -28,6 +28,11 @@ function App() {
   useEffect(() => {
     if (!auth.token()) return
     api<{ user: Principal }>('/api/v1/auth/me').then(r => setUser(r.user)).catch(() => auth.clear()).finally(() => setChecking(false))
+  }, [])
+  useEffect(() => {
+    const logout = () => setUser(null)
+    window.addEventListener('netcontrol:session-expired', logout)
+    return () => window.removeEventListener('netcontrol:session-expired', logout)
   }, [])
   if (checking) return <div className="app-loader"><span className="brand-mark"><Wifi /></span></div>
   return user ? <Shell user={user} onLogout={() => { auth.clear(); setUser(null) }} /> : <Login onLogin={setUser} />
@@ -138,21 +143,26 @@ function Catalog() {
 function Firmwares({ canManage, canUpload }: { canManage: boolean; canUpload: boolean }) {
   const state = useData<Envelope<Firmware[]>>('/api/v1/acs/firmwares'); const modelsState = useData<Envelope<Model[]>>('/api/v1/acs/router-models'); const rows = state.data?.data || []
   const [editing, setEditing] = useState<Firmware | null | undefined>(undefined)
+  const [viewing, setViewing] = useState<Firmware | undefined>(undefined)
   async function upload(id: string, file?: File) { if (!file) return; const body = new FormData(); body.append('file', file); try { await api(`/api/v1/acs/firmwares/${id}/file`, { method: 'POST', body }); state.reload() } catch (e) { alert(e instanceof Error ? e.message : 'Erro no upload') } }
   async function remove(item: Firmware) { if (!confirm(`Excluir o firmware “${item.name}” versão ${item.version}?`)) return; try { await api(`/api/v1/acs/firmwares/${item.id}`, { method: 'DELETE' }); state.reload() } catch (e) { alert(e instanceof Error ? e.message : 'Erro ao excluir') } }
   async function download(item: Firmware) { try { const file = await downloadFile(`/api/v1/acs/firmwares/${item.id}/file`); const url = URL.createObjectURL(file.blob); const link = document.createElement('a'); link.href = url; link.download = file.name; link.click(); URL.revokeObjectURL(url) } catch (e) { alert(e instanceof Error ? e.message : 'Erro no download') } }
-  return <Page title="Firmwares" description="Versões de software disponíveis para os equipamentos." action={canManage && <button className="button primary" onClick={() => setEditing(null)}><Plus size={16} /> Adicionar firmware</button>}>
+  async function makeDefault(item: Firmware) { if (!confirm(`Definir “${item.name}” versão ${item.version} como firmware padrão?`)) return; try { await api(`/api/v1/acs/firmwares/${item.id}/default`, { method: 'POST' }); state.reload() } catch (e) { alert(e instanceof Error ? e.message : 'Erro ao definir firmware padrão') } }
+  return <Page title="Firmwares" description="Versões de software disponíveis para os equipamentos." action={<div className="page-actions"><button className="button" onClick={state.reload}><RefreshCw size={16} /> Atualizar</button>{canManage && <button className="button primary" onClick={() => setEditing(null)}><Plus size={16} /> Adicionar firmware</button>}</div>}>
     <State {...state} empty={!rows.length} reload={state.reload} />{rows.length > 0 && <Table headers={['Firmware', 'Modelo', 'Hardware', 'Arquivo', 'Atualizado em', 'Status', 'Ações']}>{rows.map(f => <tr key={f.id}><td><strong>{f.name}</strong><small>Versão {f.version}{f.is_default ? ' · Padrão' : ''}</small></td><td>{f.router_model_name}</td><td>{f.hardware_version || 'Todos'}</td><td>{f.file_size != null ? `${(f.file_size / 1024 / 1024).toFixed(1)} MB` : '—'}</td><td>{formatDate(f.updated_at)}</td><td><Badge value={f.status} /></td><td><div className="row-actions">
+      <button title="Ver informações" onClick={() => setViewing(f)}><Info /></button>
       {canManage && f.status === 'NO_FILE' && <button title="Editar" onClick={() => setEditing(f)}><Edit3 /></button>}
+      {canManage && !f.is_default && <button title="Definir como padrão" onClick={() => makeDefault(f)}><Star /></button>}
       {canUpload && f.status === 'NO_FILE' && <label title="Enviar arquivo"><Upload /><input type="file" onChange={e => upload(f.id, e.target.files?.[0])} /></label>}
       {f.status === 'READY' && <button title="Baixar arquivo" onClick={() => download(f)}><Download /></button>}
       {canManage && <button className="danger" title="Excluir" onClick={() => remove(f)}><Trash2 /></button>}
     </div></td></tr>)}</Table>}
     {editing !== undefined && <FirmwareModal item={editing} models={modelsState.data?.data || []} allowUpload={canUpload} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); state.reload() }} />}
+    {viewing && <FirmwareModal item={viewing} models={modelsState.data?.data || []} allowUpload={false} readOnly onClose={() => setViewing(undefined)} onSaved={() => setViewing(undefined)} />}
   </Page>
 }
 
-function FirmwareModal({ item, models, allowUpload, onClose, onSaved }: { item: Firmware | null; models: Model[]; allowUpload: boolean; onClose: () => void; onSaved: () => void }) {
+function FirmwareModal({ item, models, allowUpload, readOnly = false, onClose, onSaved }: { item: Firmware | null; models: Model[]; allowUpload: boolean; readOnly?: boolean; onClose: () => void; onSaved: () => void }) {
   const [modelId, setModelId] = useState(item?.router_model_id || ''), [hardwareId, setHardwareId] = useState(item?.hardware_version_id || '')
   const [name, setName] = useState(item?.name || ''), [version, setVersion] = useState(item?.version || ''), [description, setDescription] = useState(item?.description || ''), [notes, setNotes] = useState(item?.release_notes || '')
   const [isDefault, setDefault] = useState(item?.is_default || false), [active, setActive] = useState(item?.active ?? true), [file, setFile] = useState<File | null>(null)
@@ -167,13 +177,13 @@ function FirmwareModal({ item, models, allowUpload, onClose, onSaved }: { item: 
       onSaved()
     } catch (e) { setError(e instanceof Error ? e.message : 'Não foi possível salvar.') } finally { setSaving(false) }
   }
-  return <div className="modal-backdrop" onMouseDown={e => e.target === e.currentTarget && onClose()}><section className="modal"><div className="modal-head"><div><h2>{item ? 'Editar firmware' : 'Adicionar firmware'}</h2><p>{item ? 'Altere os metadados antes de enviar o arquivo.' : 'Cadastre uma nova versão no catálogo.'}</p></div><button className="icon-button" onClick={onClose}><X /></button></div><form onSubmit={submit}>
-    <div className="form-grid"><Field label="Modelo do roteador"><select value={modelId} onChange={e => { setModelId(e.target.value); setHardwareId('') }} required><option value="">Selecione um modelo</option>{models.filter(m => m.active).map(m => <option value={m.id} key={m.id}>{m.manufacturer_name} · {m.name}</option>)}</select></Field><Field label="Versão de hardware"><select value={hardwareId} onChange={e => setHardwareId(e.target.value)}><option value="">Todas as versões</option>{hardware.map(h => <option value={h.id} key={h.id}>{h.version}</option>)}</select></Field></div>
+  return <div className="modal-backdrop" onMouseDown={e => e.target === e.currentTarget && onClose()}><section className="modal"><div className="modal-head"><div><h2>{readOnly ? 'Informações do firmware' : item ? 'Editar firmware' : 'Adicionar firmware'}</h2><p>{readOnly ? 'Consulte os dados cadastrados para esta versão.' : item ? 'Altere os metadados antes de enviar o arquivo.' : 'Cadastre uma nova versão no catálogo.'}</p></div><button className="icon-button" onClick={onClose}><X /></button></div><form onSubmit={submit}>
+    <fieldset disabled={readOnly}><div className="form-grid"><Field label="Modelo do roteador"><select value={modelId} onChange={e => { setModelId(e.target.value); setHardwareId('') }} required><option value="">Selecione um modelo</option>{models.filter(m => m.active || m.id === modelId).map(m => <option value={m.id} key={m.id}>{m.manufacturer_name} · {m.name}</option>)}</select></Field><Field label="Versão de hardware"><select value={hardwareId} onChange={e => setHardwareId(e.target.value)}><option value="">Todas as versões</option>{hardware.map(h => <option value={h.id} key={h.id}>{h.version}</option>)}</select></Field></div>
     <div className="form-grid"><Field label="Nome"><input value={name} onChange={e => setName(e.target.value)} maxLength={200} required /></Field><Field label="Versão"><input value={version} onChange={e => setVersion(e.target.value)} maxLength={100} required /></Field></div>
     <Field label="Descrição"><textarea value={description} onChange={e => setDescription(e.target.value)} rows={3} /></Field><Field label="Notas da versão"><textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} /></Field>
     {!item && allowUpload && <Field label="Arquivo (opcional)"><label className="file-picker"><Upload size={17} /><span>{file?.name || 'Selecionar arquivo de firmware'}</span><input type="file" onChange={e => setFile(e.target.files?.[0] || null)} /></label></Field>}
-    <div className="check-row"><label><input type="checkbox" checked={isDefault} onChange={e => setDefault(e.target.checked)} /> Firmware padrão</label><label><input type="checkbox" checked={active} onChange={e => setActive(e.target.checked)} /> Ativo</label></div>
-    {error && <div className="form-error">{error}</div>}<div className="modal-actions"><button type="button" className="button" onClick={onClose}>Cancelar</button><button className="button primary" disabled={saving}>{saving ? <><RefreshCw className="spin" size={15} /> Salvando</> : 'Salvar firmware'}</button></div>
+    <div className="check-row"><label><input type="checkbox" checked={isDefault} onChange={e => setDefault(e.target.checked)} /> Firmware padrão</label><label><input type="checkbox" checked={active} onChange={e => setActive(e.target.checked)} /> Ativo</label></div></fieldset>
+    {error && <div className="form-error">{error}</div>}<div className="modal-actions"><button type="button" className="button" onClick={onClose}>{readOnly ? 'Fechar' : 'Cancelar'}</button>{!readOnly && <button className="button primary" disabled={saving}>{saving ? <><RefreshCw className="spin" size={15} /> Salvando</> : 'Salvar firmware'}</button>}</div>
   </form></section></div>
 }
 

@@ -97,6 +97,26 @@ func (r *Repository) Update(ctx context.Context, tenantID, id string, input Inpu
 	})
 	return item, err
 }
+func (r *Repository) SetDefault(ctx context.Context, tenantID, id string) (Firmware, error) {
+	var item Firmware
+	err := database.InTenantTransaction(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		var modelID string
+		var hardwareID *string
+		if err := tx.QueryRow(ctx, `SELECT router_model_id,hardware_version_id FROM acs.firmwares WHERE tenant_id=$1 AND id=$2 FOR UPDATE`, tenantID, id).Scan(&modelID, &hardwareID); errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		} else if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE acs.firmwares SET is_default=false WHERE tenant_id=$1 AND router_model_id=$2 AND hardware_version_id IS NOT DISTINCT FROM $3::uuid AND is_default`, tenantID, modelID, hardwareID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE acs.firmwares SET is_default=true,active=true WHERE tenant_id=$1 AND id=$2`, tenantID, id); err != nil {
+			return err
+		}
+		return scan(tx.QueryRow(ctx, baseSelect+` WHERE f.tenant_id=$1 AND f.id=$2`, tenantID, id), &item)
+	})
+	return item, err
+}
 func (r *Repository) Delete(ctx context.Context, tenantID, id string) (string, error) {
 	var path *string
 	err := database.InTenantTransaction(ctx, r.pool, tenantID, func(tx pgx.Tx) error {

@@ -25,6 +25,7 @@ type Store interface {
 	Get(context.Context, string, string) (Firmware, error)
 	Create(context.Context, string, Input) (Firmware, error)
 	Update(context.Context, string, string, Input) (Firmware, error)
+	SetDefault(context.Context, string, string) (Firmware, error)
 	Delete(context.Context, string, string) (string, error)
 	Attach(context.Context, string, string, string, StoredFile) (Firmware, error)
 	Exists(context.Context, string, string) error
@@ -61,6 +62,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/acs/firmwares/{id}", read(http.HandlerFunc(h.get)))
 	mux.Handle("POST /api/v1/acs/firmwares", create(http.HandlerFunc(h.create)))
 	mux.Handle("PUT /api/v1/acs/firmwares/{id}", create(http.HandlerFunc(h.update)))
+	mux.Handle("POST /api/v1/acs/firmwares/{id}/default", create(http.HandlerFunc(h.setDefault)))
 	mux.Handle("DELETE /api/v1/acs/firmwares/{id}", create(http.HandlerFunc(h.delete)))
 	mux.Handle("POST /api/v1/acs/firmwares/{id}/file", upload(http.HandlerFunc(h.upload)))
 	mux.Handle("GET /api/v1/acs/firmwares/{id}/file", read(http.HandlerFunc(h.download)))
@@ -145,6 +147,19 @@ func (h *Handler) save(w http.ResponseWriter, r *http.Request, id string) {
 		status = http.StatusCreated
 	}
 	httpserver.WriteJSON(w, status, map[string]any{"data": item})
+}
+
+func (h *Handler) setDefault(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validID(w, r, id) {
+		return
+	}
+	principal, _ := auth.PrincipalFromContext(r.Context())
+	item, err := h.store.SetDefault(r.Context(), principal.TenantID, id)
+	if h.writeError(w, r, "set default firmware", err) {
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"data": item})
 }
 
 func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {

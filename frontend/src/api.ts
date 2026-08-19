@@ -7,6 +7,11 @@ export const auth = {
   clear: () => localStorage.removeItem(TOKEN_KEY),
 }
 
+function expireSession() {
+  auth.clear()
+  window.dispatchEvent(new Event('netcontrol:session-expired'))
+}
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message) }
 }
@@ -19,7 +24,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(path, { ...init, headers })
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) {
-    if (response.status === 401) auth.clear()
+    if (response.status === 401) expireSession()
     throw new ApiError(response.status, payload?.error?.message || 'Não foi possível concluir a solicitação.')
   }
   return payload as T
@@ -28,6 +33,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 export async function downloadFile(path: string): Promise<{ blob: Blob; name: string }> {
   const response = await fetch(path, { headers: { Authorization: `Bearer ${auth.token()}` } })
   if (!response.ok) {
+    if (response.status === 401) expireSession()
     const payload = await response.json().catch(() => ({}))
     throw new ApiError(response.status, payload?.error?.message || 'Não foi possível baixar o arquivo.')
   }

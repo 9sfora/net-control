@@ -49,4 +49,5 @@ export const label: Record<string, string> = {
   WAITING_DEVICE: 'Aguardando', PROCESSING: 'Processando', RETRY_SCHEDULED: 'Nova tentativa',
   COMPLETED: 'Concluído', FAILED: 'Falhou', CANCELED: 'Cancelado', EXPIRED: 'Expirado',
   READY: 'Pronto', NO_FILE: 'Sem arquivo', ACTIVATE: 'Ativação', UPDATE_FIRMWARE: 'Firmware',
+  PUBLISHED: 'Sim', DRAFT: 'Não',
 }

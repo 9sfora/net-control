@@ -1,0 +1,1 @@
+ALTER TABLE acs.firmwares ALTER COLUMN active SET DEFAULT TRUE;

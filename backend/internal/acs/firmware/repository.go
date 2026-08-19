@@ -14,7 +14,9 @@ var (
 	ErrNotFound             = errors.New("firmware not found")
 	ErrConflict             = errors.New("firmware already exists")
 	ErrInvalidCompatibility = errors.New("invalid firmware compatibility")
-	ErrImmutable            = errors.New("firmware with file is immutable")
+	ErrImmutable            = errors.New("published firmware is immutable")
+	ErrFileRequired         = errors.New("firmware file is required")
+	ErrNotPublished         = errors.New("firmware is not published")
 )
 
 type Repository struct{ pool *pgxpool.Pool }
@@ -56,12 +58,8 @@ func (r *Repository) Create(ctx context.Context, tenantID string, input Input) (
 		if err := validateCompatibility(ctx, tx, tenantID, input.RouterModelID, input.HardwareVersionID); err != nil {
 			return err
 		}
-		active := true
-		if input.Active != nil {
-			active = *input.Active
-		}
 		var id string
-		err := tx.QueryRow(ctx, `INSERT INTO acs.firmwares(tenant_id,router_model_id,hardware_version_id,name,version,description,release_notes,is_default,active)VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)RETURNING id`, tenantID, input.RouterModelID, input.HardwareVersionID, input.Name, input.Version, input.Description, input.ReleaseNotes, input.IsDefault, active).Scan(&id)
+		err := tx.QueryRow(ctx, `INSERT INTO acs.firmwares(tenant_id,router_model_id,hardware_version_id,name,version,description,release_notes,is_default,active)VALUES($1,$2,$3,$4,$5,$6,$7,false,false)RETURNING id`, tenantID, input.RouterModelID, input.HardwareVersionID, input.Name, input.Version, input.Description, input.ReleaseNotes).Scan(&id)
 		if err != nil {
 			return persistenceError(err)
 		}
@@ -75,12 +73,8 @@ func (r *Repository) Update(ctx context.Context, tenantID, id string, input Inpu
 		if err := validateCompatibility(ctx, tx, tenantID, input.RouterModelID, input.HardwareVersionID); err != nil {
 			return err
 		}
-		active := true
-		if input.Active != nil {
-			active = *input.Active
-		}
-		var status string
-		err := tx.QueryRow(ctx, `UPDATE acs.firmwares SET router_model_id=$3,hardware_version_id=$4,name=$5,version=$6,description=$7,release_notes=$8,is_default=$9,active=$10 WHERE tenant_id=$1 AND id=$2 AND status='NO_FILE' RETURNING status`, tenantID, id, input.RouterModelID, input.HardwareVersionID, input.Name, input.Version, input.Description, input.ReleaseNotes, input.IsDefault, active).Scan(&status)
+		var active bool
+		err := tx.QueryRow(ctx, `UPDATE acs.firmwares SET router_model_id=$3,hardware_version_id=$4,name=$5,version=$6,description=$7,release_notes=$8 WHERE tenant_id=$1 AND id=$2 AND NOT active RETURNING active`, tenantID, id, input.RouterModelID, input.HardwareVersionID, input.Name, input.Version, input.Description, input.ReleaseNotes).Scan(&active)
 		if errors.Is(err, pgx.ErrNoRows) {
 			var exists bool
 			if checkErr := tx.QueryRow(ctx, `SELECT true FROM acs.firmwares WHERE tenant_id=$1 AND id=$2`, tenantID, id).Scan(&exists); errors.Is(checkErr, pgx.ErrNoRows) {
@@ -97,20 +91,47 @@ func (r *Repository) Update(ctx context.Context, tenantID, id string, input Inpu
 	})
 	return item, err
 }
+func (r *Repository) Publish(ctx context.Context, tenantID, id string) (Firmware, error) {
+	var item Firmware
+	err := database.InTenantTransaction(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		var status string
+		var active bool
+		if err := tx.QueryRow(ctx, `SELECT status,active FROM acs.firmwares WHERE tenant_id=$1 AND id=$2 FOR UPDATE`, tenantID, id).Scan(&status, &active); errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		} else if err != nil {
+			return err
+		}
+		if active {
+			return scan(tx.QueryRow(ctx, baseSelect+` WHERE f.tenant_id=$1 AND f.id=$2`, tenantID, id), &item)
+		}
+		if status != "READY" {
+			return ErrFileRequired
+		}
+		if _, err := tx.Exec(ctx, `UPDATE acs.firmwares SET active=true,is_default=false WHERE tenant_id=$1 AND id=$2`, tenantID, id); err != nil {
+			return err
+		}
+		return scan(tx.QueryRow(ctx, baseSelect+` WHERE f.tenant_id=$1 AND f.id=$2`, tenantID, id), &item)
+	})
+	return item, err
+}
 func (r *Repository) SetDefault(ctx context.Context, tenantID, id string) (Firmware, error) {
 	var item Firmware
 	err := database.InTenantTransaction(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
 		var modelID string
 		var hardwareID *string
-		if err := tx.QueryRow(ctx, `SELECT router_model_id,hardware_version_id FROM acs.firmwares WHERE tenant_id=$1 AND id=$2 FOR UPDATE`, tenantID, id).Scan(&modelID, &hardwareID); errors.Is(err, pgx.ErrNoRows) {
+		var active bool
+		if err := tx.QueryRow(ctx, `SELECT router_model_id,hardware_version_id,active FROM acs.firmwares WHERE tenant_id=$1 AND id=$2 FOR UPDATE`, tenantID, id).Scan(&modelID, &hardwareID, &active); errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		} else if err != nil {
 			return err
 		}
+		if !active {
+			return ErrNotPublished
+		}
 		if _, err := tx.Exec(ctx, `UPDATE acs.firmwares SET is_default=false WHERE tenant_id=$1 AND router_model_id=$2 AND hardware_version_id IS NOT DISTINCT FROM $3::uuid AND is_default`, tenantID, modelID, hardwareID); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `UPDATE acs.firmwares SET is_default=true,active=true WHERE tenant_id=$1 AND id=$2`, tenantID, id); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE acs.firmwares SET is_default=true WHERE tenant_id=$1 AND id=$2`, tenantID, id); err != nil {
 			return err
 		}
 		return scan(tx.QueryRow(ctx, baseSelect+` WHERE f.tenant_id=$1 AND f.id=$2`, tenantID, id), &item)
@@ -134,7 +155,7 @@ func (r *Repository) Delete(ctx context.Context, tenantID, id string) (string, e
 func (r *Repository) Attach(ctx context.Context, tenantID, id, originalName string, file StoredFile) (Firmware, error) {
 	var item Firmware
 	err := database.InTenantTransaction(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `UPDATE acs.firmwares SET file_path=$3,file_name=$4,file_size=$5,checksum_sha256=$6,status='READY',uploaded_at=now() WHERE tenant_id=$1 AND id=$2 AND status='NO_FILE' RETURNING id`, tenantID, id, file.Path, originalName, file.Size, file.Checksum).Scan(&item.ID)
+		err := tx.QueryRow(ctx, `UPDATE acs.firmwares SET file_path=$3,file_name=$4,file_size=$5,checksum_sha256=$6,status='READY',uploaded_at=now() WHERE tenant_id=$1 AND id=$2 AND NOT active RETURNING id`, tenantID, id, file.Path, originalName, file.Size, file.Checksum).Scan(&item.ID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			var exists bool
 			if checkErr := tx.QueryRow(ctx, `SELECT true FROM acs.firmwares WHERE tenant_id=$1 AND id=$2`, tenantID, id).Scan(&exists); errors.Is(checkErr, pgx.ErrNoRows) {
@@ -153,12 +174,12 @@ func (r *Repository) Attach(ctx context.Context, tenantID, id, originalName stri
 }
 func (r *Repository) Exists(ctx context.Context, tenantID, id string) error {
 	return database.InTenantTransaction(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
-		var status string
-		err := tx.QueryRow(ctx, `SELECT status FROM acs.firmwares WHERE tenant_id=$1 AND id=$2`, tenantID, id).Scan(&status)
+		var active bool
+		err := tx.QueryRow(ctx, `SELECT active FROM acs.firmwares WHERE tenant_id=$1 AND id=$2`, tenantID, id).Scan(&active)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
-		if err == nil && status != "NO_FILE" {
+		if err == nil && active {
 			return ErrImmutable
 		}
 		return err

@@ -25,6 +25,7 @@ type Store interface {
 	Get(context.Context, string, string) (Firmware, error)
 	Create(context.Context, string, Input) (Firmware, error)
 	Update(context.Context, string, string, Input) (Firmware, error)
+	Publish(context.Context, string, string) (Firmware, error)
 	SetDefault(context.Context, string, string) (Firmware, error)
 	Delete(context.Context, string, string) (string, error)
 	Attach(context.Context, string, string, string, StoredFile) (Firmware, error)
@@ -62,6 +63,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/acs/firmwares/{id}", read(http.HandlerFunc(h.get)))
 	mux.Handle("POST /api/v1/acs/firmwares", create(http.HandlerFunc(h.create)))
 	mux.Handle("PUT /api/v1/acs/firmwares/{id}", create(http.HandlerFunc(h.update)))
+	mux.Handle("POST /api/v1/acs/firmwares/{id}/publish", create(http.HandlerFunc(h.publish)))
 	mux.Handle("POST /api/v1/acs/firmwares/{id}/default", create(http.HandlerFunc(h.setDefault)))
 	mux.Handle("DELETE /api/v1/acs/firmwares/{id}", create(http.HandlerFunc(h.delete)))
 	mux.Handle("POST /api/v1/acs/firmwares/{id}/file", upload(http.HandlerFunc(h.upload)))
@@ -157,6 +159,19 @@ func (h *Handler) setDefault(w http.ResponseWriter, r *http.Request) {
 	principal, _ := auth.PrincipalFromContext(r.Context())
 	item, err := h.store.SetDefault(r.Context(), principal.TenantID, id)
 	if h.writeError(w, r, "set default firmware", err) {
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"data": item})
+}
+
+func (h *Handler) publish(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validID(w, r, id) {
+		return
+	}
+	principal, _ := auth.PrincipalFromContext(r.Context())
+	item, err := h.store.Publish(r.Context(), principal.TenantID, id)
+	if h.writeError(w, r, "publish firmware", err) {
 		return
 	}
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"data": item})
@@ -300,7 +315,11 @@ func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, operation s
 	case errors.Is(err, ErrInvalidCompatibility):
 		validation(w, r, "Router model or hardware version is invalid or inactive")
 	case errors.Is(err, ErrImmutable):
-		httpserver.WriteError(w, r, http.StatusConflict, "FIRMWARE_IMMUTABLE", "Firmware cannot be changed after a file is uploaded")
+		httpserver.WriteError(w, r, http.StatusConflict, "FIRMWARE_IMMUTABLE", "Published firmware cannot be changed")
+	case errors.Is(err, ErrFileRequired):
+		httpserver.WriteError(w, r, http.StatusConflict, "FIRMWARE_FILE_REQUIRED", "A firmware file is required before publishing")
+	case errors.Is(err, ErrNotPublished):
+		httpserver.WriteError(w, r, http.StatusConflict, "FIRMWARE_NOT_PUBLISHED", "Only published firmware can be set as default")
 	default:
 		h.internal(w, r, operation, err)
 	}

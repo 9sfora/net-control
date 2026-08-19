@@ -16,21 +16,21 @@ func (r *Repository) ListRouters(ctx context.Context, tenantID string, filter Li
 	items := make([]Summary, 0)
 	err := database.InTenantTransaction(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
-			SELECT id,name,manufacturer,oui,product_class,serial_number,software_version,hardware_version,router_model_id,hardware_version_id,
-			       desired_status,reported_status,first_seen_at,last_seen_at,created_at,last_inform_at,
-			       host(last_ip_address),configuration_version,updated_at,
-			       (SELECT name FROM acs.router_models WHERE id=router_model_id),
-			       (SELECT version FROM acs.router_model_hardware_versions WHERE id=hardware_version_id)
-			FROM acs.routers
-			WHERE tenant_id=$1
-			  AND ($2='' OR strpos(lower(name||' '||serial_number||' '||oui||' '||product_class),lower($2))>0)
-			  AND ($3='' OR desired_status=$3)
+			SELECT r.id,r.name,r.manufacturer,r.oui,r.product_class,r.serial_number,r.software_version,r.hardware_version,r.router_model_id,r.hardware_version_id,
+			       r.desired_status,r.reported_status,r.first_seen_at,r.last_seen_at,r.created_at,r.last_inform_at,
+			       host(r.last_ip_address),r.configuration_version,r.updated_at,
+			       (SELECT m.name FROM acs.router_models m WHERE m.id=r.router_model_id),
+			       (SELECT h.version FROM acs.router_model_hardware_versions h WHERE h.id=r.hardware_version_id)
+			FROM acs.routers r
+			WHERE r.tenant_id=$1
+			  AND ($2='' OR strpos(lower(r.name||' '||r.serial_number||' '||r.oui||' '||r.product_class),lower($2))>0)
+			  AND ($3='' OR r.desired_status=$3)
 			  AND ($4='' OR
-			      ($4='NEVER_CONNECTED' AND last_seen_at IS NULL) OR
-			      ($4='ONLINE' AND last_seen_at >= $5) OR
-			      ($4='STALE' AND last_seen_at < $5 AND last_seen_at >= $6) OR
-			      ($4='OFFLINE' AND last_seen_at < $6))
-			ORDER BY name,id LIMIT $7 OFFSET $8`, tenantID, filter.Search, filter.DesiredStatus,
+			      ($4='NEVER_CONNECTED' AND r.last_seen_at IS NULL) OR
+			      ($4='ONLINE' AND r.last_seen_at >= $5) OR
+			      ($4='STALE' AND r.last_seen_at < $5 AND r.last_seen_at >= $6) OR
+			      ($4='OFFLINE' AND r.last_seen_at < $6))
+			ORDER BY r.name,r.id LIMIT $7 OFFSET $8`, tenantID, filter.Search, filter.DesiredStatus,
 			filter.ConnectivityStatus, filter.OnlineCutoff, filter.OfflineCutoff, filter.Limit, filter.Offset)
 		if err != nil {
 			return fmt.Errorf("list routers: %w", err)
@@ -52,12 +52,12 @@ func (r *Repository) GetRouter(ctx context.Context, tenantID, routerID string) (
 	detail := Detail{WiFi: make([]WiFiView, 0), Sessions: make([]Session, 0), Commands: make([]RecentCommand, 0)}
 	err := database.InTenantTransaction(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
 		row := tx.QueryRow(ctx, `
-			SELECT id,name,manufacturer,oui,product_class,serial_number,software_version,hardware_version,router_model_id,hardware_version_id,
-			       desired_status,reported_status,first_seen_at,last_seen_at,created_at,last_inform_at,
-			       host(last_ip_address),configuration_version,updated_at,
-			       (SELECT name FROM acs.router_models WHERE id=router_model_id),
-			       (SELECT version FROM acs.router_model_hardware_versions WHERE id=hardware_version_id)
-			FROM acs.routers WHERE tenant_id=$1 AND id=$2`, tenantID, routerID)
+			SELECT r.id,r.name,r.manufacturer,r.oui,r.product_class,r.serial_number,r.software_version,r.hardware_version,r.router_model_id,r.hardware_version_id,
+			       r.desired_status,r.reported_status,r.first_seen_at,r.last_seen_at,r.created_at,r.last_inform_at,
+			       host(r.last_ip_address),r.configuration_version,r.updated_at,
+			       (SELECT m.name FROM acs.router_models m WHERE m.id=r.router_model_id),
+			       (SELECT h.version FROM acs.router_model_hardware_versions h WHERE h.id=r.hardware_version_id)
+			FROM acs.routers r WHERE r.tenant_id=$1 AND r.id=$2`, tenantID, routerID)
 		if err := scanSummary(row, &detail.Summary); errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		} else if err != nil {

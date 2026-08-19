@@ -14,6 +14,7 @@ var (
 	ErrNotFound             = errors.New("firmware not found")
 	ErrConflict             = errors.New("firmware already exists")
 	ErrInvalidCompatibility = errors.New("invalid firmware compatibility")
+	ErrImmutable            = errors.New("firmware with file is immutable")
 )
 
 type Repository struct{ pool *pgxpool.Pool }
@@ -68,12 +69,60 @@ func (r *Repository) Create(ctx context.Context, tenantID string, input Input) (
 	})
 	return item, err
 }
+func (r *Repository) Update(ctx context.Context, tenantID, id string, input Input) (Firmware, error) {
+	var item Firmware
+	err := database.InTenantTransaction(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		if err := validateCompatibility(ctx, tx, tenantID, input.RouterModelID, input.HardwareVersionID); err != nil {
+			return err
+		}
+		active := true
+		if input.Active != nil {
+			active = *input.Active
+		}
+		var status string
+		err := tx.QueryRow(ctx, `UPDATE acs.firmwares SET router_model_id=$3,hardware_version_id=$4,name=$5,version=$6,description=$7,release_notes=$8,is_default=$9,active=$10 WHERE tenant_id=$1 AND id=$2 AND status='NO_FILE' RETURNING status`, tenantID, id, input.RouterModelID, input.HardwareVersionID, input.Name, input.Version, input.Description, input.ReleaseNotes, input.IsDefault, active).Scan(&status)
+		if errors.Is(err, pgx.ErrNoRows) {
+			var exists bool
+			if checkErr := tx.QueryRow(ctx, `SELECT true FROM acs.firmwares WHERE tenant_id=$1 AND id=$2`, tenantID, id).Scan(&exists); errors.Is(checkErr, pgx.ErrNoRows) {
+				return ErrNotFound
+			} else if checkErr != nil {
+				return checkErr
+			}
+			return ErrImmutable
+		}
+		if err != nil {
+			return persistenceError(err)
+		}
+		return scan(tx.QueryRow(ctx, baseSelect+` WHERE f.tenant_id=$1 AND f.id=$2`, tenantID, id), &item)
+	})
+	return item, err
+}
+func (r *Repository) Delete(ctx context.Context, tenantID, id string) (string, error) {
+	var path *string
+	err := database.InTenantTransaction(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `DELETE FROM acs.firmwares WHERE tenant_id=$1 AND id=$2 RETURNING file_path`, tenantID, id).Scan(&path)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	})
+	if path == nil {
+		return "", err
+	}
+	return *path, err
+}
 func (r *Repository) Attach(ctx context.Context, tenantID, id, originalName string, file StoredFile) (Firmware, error) {
 	var item Firmware
 	err := database.InTenantTransaction(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `UPDATE acs.firmwares SET file_path=$3,file_name=$4,file_size=$5,checksum_sha256=$6,status='READY',uploaded_at=now() WHERE tenant_id=$1 AND id=$2 RETURNING id`, tenantID, id, file.Path, originalName, file.Size, file.Checksum).Scan(&item.ID)
+		err := tx.QueryRow(ctx, `UPDATE acs.firmwares SET file_path=$3,file_name=$4,file_size=$5,checksum_sha256=$6,status='READY',uploaded_at=now() WHERE tenant_id=$1 AND id=$2 AND status='NO_FILE' RETURNING id`, tenantID, id, file.Path, originalName, file.Size, file.Checksum).Scan(&item.ID)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrNotFound
+			var exists bool
+			if checkErr := tx.QueryRow(ctx, `SELECT true FROM acs.firmwares WHERE tenant_id=$1 AND id=$2`, tenantID, id).Scan(&exists); errors.Is(checkErr, pgx.ErrNoRows) {
+				return ErrNotFound
+			} else if checkErr != nil {
+				return checkErr
+			}
+			return ErrImmutable
 		}
 		if err != nil {
 			return err
@@ -84,10 +133,13 @@ func (r *Repository) Attach(ctx context.Context, tenantID, id, originalName stri
 }
 func (r *Repository) Exists(ctx context.Context, tenantID, id string) error {
 	return database.InTenantTransaction(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
-		var exists bool
-		err := tx.QueryRow(ctx, `SELECT true FROM acs.firmwares WHERE tenant_id=$1 AND id=$2`, tenantID, id).Scan(&exists)
+		var status string
+		err := tx.QueryRow(ctx, `SELECT status FROM acs.firmwares WHERE tenant_id=$1 AND id=$2`, tenantID, id).Scan(&status)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
+		}
+		if err == nil && status != "NO_FILE" {
+			return ErrImmutable
 		}
 		return err
 	})

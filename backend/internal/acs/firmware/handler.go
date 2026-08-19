@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/charlesduarte/net-control/backend/internal/core/auth"
@@ -20,6 +23,8 @@ type Store interface {
 	List(context.Context, string, string) ([]Firmware, error)
 	Get(context.Context, string, string) (Firmware, error)
 	Create(context.Context, string, Input) (Firmware, error)
+	Update(context.Context, string, string, Input) (Firmware, error)
+	Delete(context.Context, string, string) (string, error)
 	Attach(context.Context, string, string, string, StoredFile) (Firmware, error)
 	Exists(context.Context, string, string) error
 }
@@ -27,6 +32,7 @@ type Store interface {
 type FileStorage interface {
 	Save(string, io.Reader) (StoredFile, error)
 	Remove(string) error
+	Open(string) (*os.File, error)
 }
 
 type Handler struct {
@@ -52,7 +58,10 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/acs/firmwares", read(http.HandlerFunc(h.list)))
 	mux.Handle("GET /api/v1/acs/firmwares/{id}", read(http.HandlerFunc(h.get)))
 	mux.Handle("POST /api/v1/acs/firmwares", create(http.HandlerFunc(h.create)))
+	mux.Handle("PUT /api/v1/acs/firmwares/{id}", create(http.HandlerFunc(h.update)))
+	mux.Handle("DELETE /api/v1/acs/firmwares/{id}", create(http.HandlerFunc(h.delete)))
 	mux.Handle("POST /api/v1/acs/firmwares/{id}/file", upload(http.HandlerFunc(h.upload)))
+	mux.Handle("GET /api/v1/acs/firmwares/{id}/file", read(http.HandlerFunc(h.download)))
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
@@ -84,6 +93,18 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
+	h.save(w, r, "")
+}
+
+func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validID(w, r, id) {
+		return
+	}
+	h.save(w, r, id)
+}
+
+func (h *Handler) save(w http.ResponseWriter, r *http.Request, id string) {
 	var input Input
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	decoder.DisallowUnknownFields()
@@ -107,11 +128,73 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	principal, _ := auth.PrincipalFromContext(r.Context())
-	item, err := h.store.Create(r.Context(), principal.TenantID, input)
+	var item Firmware
+	var err error
+	if id == "" {
+		item, err = h.store.Create(r.Context(), principal.TenantID, input)
+	} else {
+		item, err = h.store.Update(r.Context(), principal.TenantID, id, input)
+	}
 	if writeError(w, r, err) {
 		return
 	}
-	httpserver.WriteJSON(w, http.StatusCreated, map[string]any{"data": item})
+	status := http.StatusOK
+	if id == "" {
+		status = http.StatusCreated
+	}
+	httpserver.WriteJSON(w, status, map[string]any{"data": item})
+}
+
+func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validID(w, r, id) {
+		return
+	}
+	principal, _ := auth.PrincipalFromContext(r.Context())
+	path, err := h.store.Delete(r.Context(), principal.TenantID, id)
+	if writeError(w, r, err) {
+		return
+	}
+	if err := h.storage.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		internal(w, r)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) download(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validID(w, r, id) {
+		return
+	}
+	principal, _ := auth.PrincipalFromContext(r.Context())
+	item, err := h.store.Get(r.Context(), principal.TenantID, id)
+	if writeError(w, r, err) {
+		return
+	}
+	if item.Status != "READY" || item.FileName == nil {
+		httpserver.WriteError(w, r, http.StatusConflict, "FIRMWARE_FILE_UNAVAILABLE", "Firmware file is not available")
+		return
+	}
+	file, err := h.storage.Open(id + ".bin")
+	if errors.Is(err, os.ErrNotExist) {
+		httpserver.WriteError(w, r, http.StatusNotFound, "FIRMWARE_FILE_NOT_FOUND", "Firmware file not found")
+		return
+	}
+	if err != nil {
+		internal(w, r)
+		return
+	}
+	defer file.Close()
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", *item.FileName))
+	if item.FileSize != nil {
+		w.Header().Set("Content-Length", strconv.FormatInt(*item.FileSize, 10))
+	}
+	if item.ChecksumSHA256 != nil {
+		w.Header().Set("X-Checksum-SHA256", *item.ChecksumSHA256)
+	}
+	_, _ = io.Copy(w, file)
 }
 
 func (h *Handler) upload(w http.ResponseWriter, r *http.Request) {
@@ -193,6 +276,8 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) bool {
 		httpserver.WriteError(w, r, http.StatusConflict, "FIRMWARE_CONFLICT", "Firmware already exists")
 	case errors.Is(err, ErrInvalidCompatibility):
 		validation(w, r, "Router model or hardware version is invalid or inactive")
+	case errors.Is(err, ErrImmutable):
+		httpserver.WriteError(w, r, http.StatusConflict, "FIRMWARE_IMMUTABLE", "Firmware cannot be changed after a file is uploaded")
 	default:
 		internal(w, r)
 	}

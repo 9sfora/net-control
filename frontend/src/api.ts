@@ -25,6 +25,17 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   return payload as T
 }
 
+export async function downloadFile(path: string): Promise<{ blob: Blob; name: string }> {
+  const response = await fetch(path, { headers: { Authorization: `Bearer ${auth.token()}` } })
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}))
+    throw new ApiError(response.status, payload?.error?.message || 'Não foi possível baixar o arquivo.')
+  }
+  const disposition = response.headers.get('Content-Disposition') || ''
+  const name = disposition.match(/filename="?([^";]+)"?/i)?.[1] || 'firmware.bin'
+  return { blob: await response.blob(), name }
+}
+
 export const formatDate = (value?: string | null) => value ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value)) : '—'
 export const label: Record<string, string> = {
   ONLINE: 'Online', STALE: 'Instável', OFFLINE: 'Offline', NEVER_CONNECTED: 'Nunca conectado',

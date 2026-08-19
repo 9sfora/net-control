@@ -14,7 +14,7 @@ import (
 
 type ConfigurationStore interface {
 	SaveConfiguration(context.Context, string, string, DesiredConfiguration) (ConfigurationResult, error)
-	CreateActivationCommand(context.Context, string, string, string, string) (Command, error)
+	CreateActivationCommand(context.Context, string, string, string, string, string, ActivationOverrides) (Command, error)
 	CreateFirmwareCommand(context.Context, string, string, string, string, string) (Command, error)
 }
 
@@ -85,8 +85,13 @@ func (h *ConfigurationHandler) createCommand(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var input struct {
-		Type       string `json:"type"`
-		FirmwareID string `json:"firmware_id"`
+		Type           string  `json:"type"`
+		FirmwareID     string  `json:"firmware_id"`
+		Scope          string  `json:"scope"`
+		DNSPrimary     *string `json:"dns_primary"`
+		DNSSecondary   *string `json:"dns_secondary"`
+		DHCPGateway    *string `json:"dhcp_gateway"`
+		DHCPSubnetMask *string `json:"dhcp_subnet_mask"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	decoder.DisallowUnknownFields()
@@ -96,6 +101,7 @@ func (h *ConfigurationHandler) createCommand(w http.ResponseWriter, r *http.Requ
 	}
 	input.Type = strings.ToUpper(strings.TrimSpace(input.Type))
 	input.FirmwareID = strings.TrimSpace(input.FirmwareID)
+	input.Scope = strings.ToUpper(strings.TrimSpace(input.Scope))
 	if input.Type != "ACTIVATE" && input.Type != "UPDATE_FIRMWARE" {
 		httpserver.WriteError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "Command type must be ACTIVATE or UPDATE_FIRMWARE")
 		return
@@ -103,6 +109,43 @@ func (h *ConfigurationHandler) createCommand(w http.ResponseWriter, r *http.Requ
 	if input.Type == "UPDATE_FIRMWARE" && !uuidPattern.MatchString(input.FirmwareID) {
 		httpserver.WriteError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "A valid firmware_id is required")
 		return
+	}
+	if input.Type == "ACTIVATE" {
+		if input.Scope == "" {
+			input.Scope = "ALL"
+		}
+		for _, value := range []*string{input.DNSPrimary, input.DNSSecondary} {
+			if value != nil {
+				trimmed := strings.TrimSpace(*value)
+				*value = trimmed
+			}
+		}
+		if input.Scope != "DNS" && (input.DNSPrimary != nil || input.DNSSecondary != nil) {
+			httpserver.WriteError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "DNS overrides are only allowed with scope DNS")
+			return
+		}
+		if !optionalIP(input.DNSPrimary) || !optionalIP(input.DNSSecondary) {
+			httpserver.WriteError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "DNS addresses must be valid IP addresses")
+			return
+		}
+		for _, value := range []*string{input.DHCPGateway, input.DHCPSubnetMask} {
+			if value != nil {
+				trimmed := strings.TrimSpace(*value)
+				*value = trimmed
+			}
+		}
+		if input.Scope != "DHCP" && (input.DHCPGateway != nil || input.DHCPSubnetMask != nil) {
+			httpserver.WriteError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "DHCP overrides are only allowed with scope DHCP")
+			return
+		}
+		if !optionalIP(input.DHCPGateway) || !optionalIPv4Mask(input.DHCPSubnetMask) {
+			httpserver.WriteError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "DHCP gateway and subnet mask must be valid IPv4 values")
+			return
+		}
+		if input.Scope != "ALL" && input.Scope != "WIFI_24" && input.Scope != "WIFI_5" && input.Scope != "DHCP" && input.Scope != "DNS" {
+			httpserver.WriteError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "Activation scope must be ALL, WIFI_24, WIFI_5, DHCP or DNS")
+			return
+		}
 	}
 	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 	if len(idempotencyKey) > 200 {
@@ -121,7 +164,8 @@ func (h *ConfigurationHandler) createCommand(w http.ResponseWriter, r *http.Requ
 	var command Command
 	var err error
 	if input.Type == "ACTIVATE" {
-		command, err = h.store.CreateActivationCommand(r.Context(), principal.TenantID, routerID, principal.UserID, idempotencyKey)
+		overrides := ActivationOverrides{DNSPrimary: input.DNSPrimary, DNSSecondary: input.DNSSecondary, DHCPGateway: input.DHCPGateway, DHCPSubnetMask: input.DHCPSubnetMask}
+		command, err = h.store.CreateActivationCommand(r.Context(), principal.TenantID, routerID, principal.UserID, idempotencyKey, input.Scope, overrides)
 	} else {
 		command, err = h.store.CreateFirmwareCommand(r.Context(), principal.TenantID, routerID, principal.UserID, input.FirmwareID, idempotencyKey)
 	}
@@ -135,6 +179,10 @@ func (h *ConfigurationHandler) createCommand(w http.ResponseWriter, r *http.Requ
 	}
 	if errors.Is(err, ErrFirmwareUnavailable) {
 		httpserver.WriteError(w, r, http.StatusConflict, "ACS_FIRMWARE_UNAVAILABLE", "Firmware is not ready or is incompatible with the router")
+		return
+	}
+	if errors.Is(err, ErrScopeConfigurationRequired) {
+		httpserver.WriteError(w, r, http.StatusConflict, "ACS_SCOPE_CONFIGURATION_REQUIRED", "The selected activation scope has no desired configuration")
 		return
 	}
 	if err != nil {
@@ -200,8 +248,22 @@ func validateConfiguration(configuration *DesiredConfiguration) string {
 	if !optionalIP(network.DNSPrimary) || !optionalIP(network.DNSSecondary) {
 		return "DNS addresses must be valid IP addresses"
 	}
+	if !optionalIP(network.DHCPGateway) || !optionalIPv4Mask(network.DHCPSubnetMask) {
+		return "DHCP gateway and subnet mask must be valid IPv4 values"
+	}
 	return ""
 }
 
 func validIP(value *string) bool    { return value != nil && net.ParseIP(*value) != nil }
 func optionalIP(value *string) bool { return value == nil || net.ParseIP(*value) != nil }
+func optionalIPv4Mask(value *string) bool {
+	if value == nil {
+		return true
+	}
+	ip := net.ParseIP(*value)
+	if ip == nil || ip.To4() == nil {
+		return false
+	}
+	ones, bits := net.IPMask(ip.To4()).Size()
+	return bits == 32 && ones > 0
+}

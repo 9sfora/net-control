@@ -7,10 +7,10 @@ import (
 
 func TestSetParameterValues(t *testing.T) {
 	payload := string(SetParameterValues(OutboundCommand{
-		ID: "command-1", AttemptID: "attempt-1",
+		ID: "9bcc3953-0973-4bb1-afa2-f63b6975680e", AttemptID: "attempt-1",
 		Parameters: []ParameterValue{{Name: "Device.WiFi.SSID.1.SSID", Value: "A&B", Type: "string"}},
 	}))
-	for _, expected := range []string{"SetParameterValues", "attempt-1", "Device.WiFi.SSID.1.SSID", "A&amp;B"} {
+	for _, expected := range []string{"SetParameterValues", "attempt-1", "Device.WiFi.SSID.1.SSID", "A&amp;B", "<ParameterKey>9bcc395309734bb1afa2f63b6975680e</ParameterKey>"} {
 		if !strings.Contains(payload, expected) {
 			t.Fatalf("payload does not contain %q: %s", expected, payload)
 		}

@@ -39,6 +39,26 @@ type RouterModel struct {
 	CreatedAt             time.Time         `json:"created_at"`
 	UpdatedAt             time.Time         `json:"updated_at"`
 	HardwareVersions      []HardwareVersion `json:"hardware_versions,omitempty"`
+	CWMPParameters        []CWMPParameter   `json:"cwmp_parameters,omitempty"`
+}
+type CWMPParameter struct {
+	ID            string    `json:"id"`
+	RouterModelID string    `json:"router_model_id"`
+	ParameterKey  string    `json:"parameter_key"`
+	ParameterName string    `json:"parameter_name"`
+	XSDType       string    `json:"xsd_type"`
+	Active        bool      `json:"active"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+type CWMPParameterInput struct {
+	ParameterKey  string `json:"parameter_key"`
+	ParameterName string `json:"parameter_name"`
+	XSDType       string `json:"xsd_type"`
+	Active        *bool  `json:"active"`
+}
+type CWMPParametersInput struct {
+	Parameters []CWMPParameterInput `json:"parameters"`
 }
 type ManufacturerInput struct {
 	Name        string  `json:"name"`

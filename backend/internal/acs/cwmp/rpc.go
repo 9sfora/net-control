@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/xml"
 	"fmt"
+	"strings"
 )
 
 type ParameterValue struct {
@@ -80,7 +81,7 @@ func SetParameterValues(command OutboundCommand) []byte {
 		body.WriteString(`</Value></ParameterValueStruct>`)
 	}
 	body.WriteString(`</ParameterList><ParameterKey>`)
-	escape(&body, command.ID)
+	escape(&body, parameterKey(command.ID))
 	body.WriteString(`</ParameterKey></cwmp:SetParameterValues></soap-env:Body></soap-env:Envelope>`)
 	return body.Bytes()
 }
@@ -146,3 +147,11 @@ func ParseCommandResult(payload []byte) (CommandResult, error) {
 }
 
 func escape(buffer *bytes.Buffer, value string) { _ = xml.EscapeText(buffer, []byte(value)) }
+
+func parameterKey(commandID string) string {
+	key := strings.ReplaceAll(commandID, "-", "")
+	if len(key) > 32 {
+		return key[:32]
+	}
+	return key
+}

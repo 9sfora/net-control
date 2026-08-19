@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/charlesduarte/net-control/backend/internal/platform/database"
 	"github.com/jackc/pgx/v5"
@@ -45,6 +46,8 @@ type activationSnapshot struct {
 		DHCPEnabled      bool    `json:"dhcp_enabled"`
 		DHCPStart        *string `json:"dhcp_start"`
 		DHCPEnd          *string `json:"dhcp_end"`
+		DHCPGateway      *string `json:"dhcp_gateway"`
+		DHCPSubnetMask   *string `json:"dhcp_subnet_mask"`
 		DHCPLeaseSeconds *int    `json:"dhcp_lease_seconds"`
 		DNSPrimary       *string `json:"dns_primary"`
 		DNSSecondary     *string `json:"dns_secondary"`
@@ -53,6 +56,7 @@ type activationSnapshot struct {
 
 type commandParameters struct {
 	ConfigurationVersion int64              `json:"configuration_version"`
+	Scope                string             `json:"scope"`
 	Configuration        activationSnapshot `json:"configuration"`
 }
 
@@ -64,7 +68,8 @@ func (d *Dispatcher) Next(ctx context.Context, sessionID string) (OutboundComman
 	var outbound OutboundCommand
 	err = database.InTenantTransaction(ctx, d.pool, tenantID, func(tx pgx.Tx) error {
 		var routerID string
-		if err := tx.QueryRow(ctx, `SELECT router_id FROM acs.router_sessions WHERE tenant_id=$1 AND id=$2 AND status='OPEN' AND router_id IS NOT NULL`, tenantID, sessionID).Scan(&routerID); errors.Is(err, pgx.ErrNoRows) {
+		var routerModelID *string
+		if err := tx.QueryRow(ctx, `SELECT s.router_id,r.router_model_id FROM acs.router_sessions s JOIN acs.routers r ON r.id=s.router_id AND r.tenant_id=s.tenant_id WHERE s.tenant_id=$1 AND s.id=$2 AND s.status='OPEN'`, tenantID, sessionID).Scan(&routerID, &routerModelID); errors.Is(err, pgx.ErrNoRows) {
 			return ErrNoCommand
 		} else if err != nil {
 			return fmt.Errorf("find CWMP session: %w", err)
@@ -96,7 +101,14 @@ func (d *Dispatcher) Next(ctx context.Context, sessionID string) (OutboundComman
 			if err := json.Unmarshal(raw, &parameters); err != nil {
 				return fmt.Errorf("decode command parameters: %w", err)
 			}
-			mapped, err := d.mapActivation(parameters.Configuration)
+			if routerModelID == nil {
+				return errors.New("router has no model assigned for CWMP parameter mapping")
+			}
+			mappings, err := loadParameterMappings(ctx, tx, tenantID, *routerModelID)
+			if err != nil {
+				return err
+			}
+			mapped, err := d.mapActivation(parameters.Configuration, parameters.Scope, mappings)
 			if err != nil {
 				return err
 			}
@@ -237,12 +249,55 @@ func (d *Dispatcher) tenantID(ctx context.Context) (string, error) {
 	return tenantID, nil
 }
 
-func (d *Dispatcher) mapActivation(snapshot activationSnapshot) ([]ParameterValue, error) {
+type parameterMapping struct {
+	Name string
+	Type string
+}
+
+func loadParameterMappings(ctx context.Context, tx pgx.Tx, tenantID, modelID string) (map[string]parameterMapping, error) {
+	rows, err := tx.Query(ctx, `SELECT parameter_key,parameter_name,xsd_type FROM acs.router_model_cwmp_parameters WHERE tenant_id=$1 AND router_model_id=$2 AND active`, tenantID, modelID)
+	if err != nil {
+		return nil, fmt.Errorf("load model CWMP parameters: %w", err)
+	}
+	defer rows.Close()
+	mappings := make(map[string]parameterMapping)
+	for rows.Next() {
+		var key string
+		var mapping parameterMapping
+		if err := rows.Scan(&key, &mapping.Name, &mapping.Type); err != nil {
+			return nil, err
+		}
+		mappings[key] = mapping
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(mappings) == 0 {
+		return nil, errors.New("router model has no active CWMP parameter mappings")
+	}
+	return mappings, nil
+}
+
+func (d *Dispatcher) mapActivation(snapshot activationSnapshot, scope string, mappings map[string]parameterMapping) ([]ParameterValue, error) {
+	if scope == "" {
+		scope = "ALL"
+	}
 	values := make([]ParameterValue, 0, len(snapshot.WiFi)*6+6)
+	appendValue := func(key, value string) error {
+		mapping, ok := mappings[key]
+		if !ok {
+			return fmt.Errorf("CWMP parameter mapping %q is not configured for router model", key)
+		}
+		values = append(values, ParameterValue{Name: mapping.Name, Value: value, Type: mapping.Type})
+		return nil
+	}
 	for _, radio := range snapshot.WiFi {
-		index := "1"
+		bandKey := "wifi.24"
 		if radio.Band == "5GHZ" {
-			index = "2"
+			bandKey = "wifi.5"
+		}
+		if (scope == "WIFI_24" && radio.Band != "2.4GHZ") || (scope == "WIFI_5" && radio.Band != "5GHZ") || (scope != "ALL" && scope != "WIFI_24" && scope != "WIFI_5") {
+			continue
 		}
 		encrypted, err := base64.StdEncoding.DecodeString(radio.EncryptedPassword)
 		if err != nil {
@@ -252,34 +307,112 @@ func (d *Dispatcher) mapActivation(snapshot activationSnapshot) ([]ParameterValu
 		if err != nil {
 			return nil, fmt.Errorf("decrypt Wi-Fi password: %w", err)
 		}
-		values = append(values,
-			ParameterValue{"Device.WiFi.Radio." + index + ".Enable", boolean(radio.Enabled), "boolean"},
-			ParameterValue{"Device.WiFi.SSID." + index + ".SSID", radio.SSID, "string"},
-			ParameterValue{"Device.WiFi.AccessPoint." + index + ".Security.ModeEnabled", tr181Security(radio.SecurityMode), "string"},
-			ParameterValue{"Device.WiFi.AccessPoint." + index + ".Security.KeyPassphrase", password, "string"})
+		if scope == "WIFI_24" || scope == "WIFI_5" {
+			if err := appendValue(bandKey+".ssid", radio.SSID); err != nil {
+				return nil, err
+			}
+			if err := appendValue(bandKey+".password", password); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		for _, item := range []struct{ key, value string }{{bandKey + ".enabled", boolean(radio.Enabled)}, {bandKey + ".ssid", radio.SSID}, {bandKey + ".security_mode", tr181Security(radio.SecurityMode)}, {bandKey + ".password", password}} {
+			if err := appendValue(item.key, item.value); err != nil {
+				return nil, err
+			}
+		}
 		if radio.Channel != nil {
-			values = append(values, ParameterValue{"Device.WiFi.Radio." + index + ".Channel", strconv.Itoa(*radio.Channel), "unsignedInt"})
+			if err := appendValue(bandKey+".channel", strconv.Itoa(*radio.Channel)); err != nil {
+				return nil, err
+			}
 		}
 		if radio.BandwidthMHz != nil {
-			values = append(values, ParameterValue{"Device.WiFi.Radio." + index + ".OperatingChannelBandwidth", strconv.Itoa(*radio.BandwidthMHz) + "MHz", "string"})
+			if err := appendValue(bandKey+".bandwidth", strconv.Itoa(*radio.BandwidthMHz)+"MHz"); err != nil {
+				return nil, err
+			}
 		}
 	}
 	network := snapshot.Network
-	values = append(values, ParameterValue{"Device.DHCPv4.Server.Pool.1.Enable", boolean(network.DHCPEnabled), "boolean"})
+	if scope == "DHCP" {
+		if network.DHCPSubnetMask != nil {
+			if err := appendValue("dhcp.subnet_mask", *network.DHCPSubnetMask); err != nil {
+				return nil, err
+			}
+		}
+		if network.DHCPGateway != nil {
+			if err := appendValue("dhcp.gateway", *network.DHCPGateway); err != nil {
+				return nil, err
+			}
+		}
+		if network.DHCPStart != nil {
+			if err := appendValue("dhcp.start", *network.DHCPStart); err != nil {
+				return nil, err
+			}
+		}
+		if network.DHCPEnd != nil {
+			if err := appendValue("dhcp.end", *network.DHCPEnd); err != nil {
+				return nil, err
+			}
+		}
+		return values, nil
+	}
+	if scope == "DNS" {
+		dns := make([]string, 0, 2)
+		if network.DNSPrimary != nil {
+			dns = append(dns, *network.DNSPrimary)
+		}
+		if network.DNSSecondary != nil {
+			dns = append(dns, *network.DNSSecondary)
+		}
+		if len(dns) > 0 {
+			if err := appendValue("dns.servers", strings.Join(dns, ",")); err != nil {
+				return nil, err
+			}
+		}
+		return values, nil
+	}
+	if scope != "ALL" {
+		return values, nil
+	}
+	if err := appendValue("dhcp.enabled", boolean(network.DHCPEnabled)); err != nil {
+		return nil, err
+	}
 	if network.DHCPStart != nil {
-		values = append(values, ParameterValue{"Device.DHCPv4.Server.Pool.1.MinAddress", *network.DHCPStart, "string"})
+		if err := appendValue("dhcp.start", *network.DHCPStart); err != nil {
+			return nil, err
+		}
 	}
 	if network.DHCPEnd != nil {
-		values = append(values, ParameterValue{"Device.DHCPv4.Server.Pool.1.MaxAddress", *network.DHCPEnd, "string"})
+		if err := appendValue("dhcp.end", *network.DHCPEnd); err != nil {
+			return nil, err
+		}
+	}
+	if network.DHCPSubnetMask != nil {
+		if err := appendValue("dhcp.subnet_mask", *network.DHCPSubnetMask); err != nil {
+			return nil, err
+		}
+	}
+	if network.DHCPGateway != nil {
+		if err := appendValue("dhcp.gateway", *network.DHCPGateway); err != nil {
+			return nil, err
+		}
 	}
 	if network.DHCPLeaseSeconds != nil {
-		values = append(values, ParameterValue{"Device.DHCPv4.Server.Pool.1.LeaseTime", strconv.Itoa(*network.DHCPLeaseSeconds), "int"})
+		if err := appendValue("dhcp.lease_seconds", strconv.Itoa(*network.DHCPLeaseSeconds)); err != nil {
+			return nil, err
+		}
 	}
+	dns := make([]string, 0, 2)
 	if network.DNSPrimary != nil {
-		values = append(values, ParameterValue{"Device.DNS.Client.Server.1.DNSServer", *network.DNSPrimary, "string"})
+		dns = append(dns, *network.DNSPrimary)
 	}
 	if network.DNSSecondary != nil {
-		values = append(values, ParameterValue{"Device.DNS.Client.Server.2.DNSServer", *network.DNSSecondary, "string"})
+		dns = append(dns, *network.DNSSecondary)
+	}
+	if len(dns) > 0 {
+		if err := appendValue("dns.servers", strings.Join(dns, ",")); err != nil {
+			return nil, err
+		}
 	}
 	return values, nil
 }

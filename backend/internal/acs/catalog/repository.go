@@ -83,6 +83,7 @@ func (r *Repository) ListModels(ctx context.Context, tenantID, search, manufactu
 func (r *Repository) GetModel(ctx context.Context, tenantID, id string) (RouterModel, error) {
 	var item RouterModel
 	item.HardwareVersions = make([]HardwareVersion, 0)
+	item.CWMPParameters = make([]CWMPParameter, 0)
 	err := database.InTenantTransaction(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
 		err := scanModel(tx.QueryRow(ctx, `SELECT m.id,m.manufacturer_id,f.name,m.name,m.manufacturer_model_name,m.supports_wifi_2_4,m.supports_wifi_5,m.supported_auth_modes,m.product_class,m.oui,m.protocol,m.description,m.active,m.created_at,m.updated_at FROM acs.router_models m JOIN acs.manufacturers f ON f.id=m.manufacturer_id WHERE m.tenant_id=$1 AND m.id=$2`, tenantID, id), &item)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -103,7 +104,23 @@ func (r *Repository) GetModel(ctx context.Context, tenantID, id string) (RouterM
 			}
 			item.HardwareVersions = append(item.HardwareVersions, version)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		rows.Close()
+		parameterRows, err := tx.Query(ctx, `SELECT id,router_model_id,parameter_key,parameter_name,xsd_type,active,created_at,updated_at FROM acs.router_model_cwmp_parameters WHERE tenant_id=$1 AND router_model_id=$2 ORDER BY parameter_key`, tenantID, id)
+		if err != nil {
+			return err
+		}
+		defer parameterRows.Close()
+		for parameterRows.Next() {
+			var parameter CWMPParameter
+			if err := scanCWMPParameter(parameterRows, &parameter); err != nil {
+				return err
+			}
+			item.CWMPParameters = append(item.CWMPParameters, parameter)
+		}
+		return parameterRows.Err()
 	})
 	return item, err
 }
@@ -125,11 +142,70 @@ func (r *Repository) SaveModel(ctx context.Context, tenantID, id string, input R
 		if err := row.Scan(&item.ID); err != nil {
 			return catalogError(err)
 		}
+		if id == "" {
+			if _, err := tx.Exec(ctx, defaultCWMPParametersSQL, tenantID, item.ID); err != nil {
+				return fmt.Errorf("create default CWMP parameter mappings: %w", err)
+			}
+		}
 		var err error
 		item, err = r.getModelTx(ctx, tx, tenantID, item.ID)
 		return err
 	})
 	return item, err
+}
+
+func (r *Repository) ListCWMPParameters(ctx context.Context, tenantID, modelID string) ([]CWMPParameter, error) {
+	items := make([]CWMPParameter, 0)
+	err := database.InTenantTransaction(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT true FROM acs.router_models WHERE tenant_id=$1 AND id=$2`, tenantID, modelID).Scan(&exists); errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		} else if err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `SELECT id,router_model_id,parameter_key,parameter_name,xsd_type,active,created_at,updated_at FROM acs.router_model_cwmp_parameters WHERE tenant_id=$1 AND router_model_id=$2 ORDER BY parameter_key`, tenantID, modelID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var item CWMPParameter
+			if err := scanCWMPParameter(rows, &item); err != nil {
+				return err
+			}
+			items = append(items, item)
+		}
+		return rows.Err()
+	})
+	return items, err
+}
+
+func (r *Repository) ReplaceCWMPParameters(ctx context.Context, tenantID, modelID string, inputs []CWMPParameterInput) ([]CWMPParameter, error) {
+	err := database.InTenantTransaction(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT true FROM acs.router_models WHERE tenant_id=$1 AND id=$2 FOR UPDATE`, tenantID, modelID).Scan(&exists); errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		} else if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM acs.router_model_cwmp_parameters WHERE tenant_id=$1 AND router_model_id=$2`, tenantID, modelID); err != nil {
+			return err
+		}
+		for _, input := range inputs {
+			active := true
+			if input.Active != nil {
+				active = *input.Active
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO acs.router_model_cwmp_parameters(tenant_id,router_model_id,parameter_key,parameter_name,xsd_type,active) VALUES($1,$2,$3,$4,$5,$6)`, tenantID, modelID, input.ParameterKey, input.ParameterName, input.XSDType, active); err != nil {
+				return catalogError(err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return r.ListCWMPParameters(ctx, tenantID, modelID)
 }
 
 func (r *Repository) SaveHardwareVersion(ctx context.Context, tenantID, modelID, id string, input HardwareVersionInput) (HardwareVersion, error) {
@@ -161,6 +237,23 @@ type scanner interface{ Scan(...any) error }
 func scanModel(row scanner, item *RouterModel) error {
 	return row.Scan(&item.ID, &item.ManufacturerID, &item.ManufacturerName, &item.Name, &item.ManufacturerModelName, &item.SupportsWiFi24, &item.SupportsWiFi5, &item.SupportedAuthModes, &item.ProductClass, &item.OUI, &item.Protocol, &item.Description, &item.Active, &item.CreatedAt, &item.UpdatedAt)
 }
+func scanCWMPParameter(row scanner, item *CWMPParameter) error {
+	return row.Scan(&item.ID, &item.RouterModelID, &item.ParameterKey, &item.ParameterName, &item.XSDType, &item.Active, &item.CreatedAt, &item.UpdatedAt)
+}
+
+const defaultCWMPParametersSQL = `INSERT INTO acs.router_model_cwmp_parameters(tenant_id,router_model_id,parameter_key,parameter_name,xsd_type)
+SELECT $1,$2,p.parameter_key,p.parameter_name,p.xsd_type FROM (VALUES
+('wifi.24.enabled','Device.WiFi.Radio.1.Enable','boolean'),('wifi.24.ssid','Device.WiFi.SSID.1.SSID','string'),
+('wifi.24.security_mode','Device.WiFi.AccessPoint.1.Security.ModeEnabled','string'),('wifi.24.password','Device.WiFi.AccessPoint.1.Security.KeyPassphrase','string'),
+('wifi.24.channel','Device.WiFi.Radio.1.Channel','unsignedInt'),('wifi.24.bandwidth','Device.WiFi.Radio.1.OperatingChannelBandwidth','string'),
+('wifi.5.enabled','Device.WiFi.Radio.2.Enable','boolean'),('wifi.5.ssid','Device.WiFi.SSID.2.SSID','string'),
+('wifi.5.security_mode','Device.WiFi.AccessPoint.2.Security.ModeEnabled','string'),('wifi.5.password','Device.WiFi.AccessPoint.2.Security.KeyPassphrase','string'),
+('wifi.5.channel','Device.WiFi.Radio.2.Channel','unsignedInt'),('wifi.5.bandwidth','Device.WiFi.Radio.2.OperatingChannelBandwidth','string'),
+('dhcp.enabled','Device.DHCPv4.Server.Pool.1.Enable','boolean'),('dhcp.start','Device.DHCPv4.Server.Pool.1.MinAddress','string'),
+('dhcp.end','Device.DHCPv4.Server.Pool.1.MaxAddress','string'),('dhcp.gateway','Device.DHCPv4.Server.Pool.1.IPRouters','string'),
+('dhcp.subnet_mask','Device.DHCPv4.Server.Pool.1.SubnetMask','string'),('dhcp.lease_seconds','Device.DHCPv4.Server.Pool.1.LeaseTime','int'),
+('dns.servers','Device.DHCPv4.Server.Pool.1.DNSServers','string')) AS p(parameter_key,parameter_name,xsd_type)`
+
 func catalogError(err error) error {
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound

@@ -124,6 +124,12 @@ Para enfileirar a ativação:
 }
 ```
 
+O campo opcional `scope` limita o `SetParameterValues` a um grupo e aceita `ALL` (padrão), `WIFI_24`, `WIFI_5`, `DHCP` ou `DNS`. Os escopos são úteis para diagnosticar profiles de equipamentos sem misturar falhas de parâmetros distintos.
+
+Com `scope: DNS`, os campos opcionais `dns_primary` e `dns_secondary` atualizam a configuração desejada e são incluídos no snapshot do comando. Ao menos um DNS precisa existir na configuração ou no pedido.
+
+Com `scope: DHCP`, `dhcp_gateway` e `dhcp_subnet_mask` podem ser enviados no próprio comando. O RPC usa `SubnetMask`, `IPRouters`, `MinAddress` e `MaxAddress`; o DNS distribuído aos clientes usa `Device.DHCPv4.Server.Pool.1.DNSServers`.
+
 O header opcional `Idempotency-Key` evita comandos duplicados. `WIFI_ENCRYPTION_KEY` deve conter uma chave aleatória de 32 bytes codificada em Base64; o valor padrão do Compose serve somente para desenvolvimento.
 
 Na sessão CWMP de um roteador conhecido, o fluxo de ativação é:

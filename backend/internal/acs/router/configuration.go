@@ -16,9 +16,18 @@ type NetworkConfiguration struct {
 	DHCPEnabled      bool    `json:"dhcp_enabled"`
 	DHCPStart        *string `json:"dhcp_start"`
 	DHCPEnd          *string `json:"dhcp_end"`
+	DHCPGateway      *string `json:"dhcp_gateway"`
+	DHCPSubnetMask   *string `json:"dhcp_subnet_mask"`
 	DHCPLeaseSeconds *int    `json:"dhcp_lease_seconds"`
 	DNSPrimary       *string `json:"dns_primary"`
 	DNSSecondary     *string `json:"dns_secondary"`
+}
+
+type ActivationOverrides struct {
+	DNSPrimary     *string
+	DNSSecondary   *string
+	DHCPGateway    *string
+	DHCPSubnetMask *string
 }
 
 type DesiredConfiguration struct {

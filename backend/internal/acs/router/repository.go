@@ -14,13 +14,14 @@ import (
 )
 
 var (
-	ErrNotFound              = errors.New("router not found")
-	ErrConfigurationRequired = errors.New("router configuration is required")
-	ErrInvalidModel          = errors.New("router model is invalid")
-	ErrInvalidHardware       = errors.New("hardware version is invalid")
-	ErrIncompatibleModel     = errors.New("router model is incompatible")
-	ErrIncompatibleHardware  = errors.New("hardware version is incompatible")
-	ErrFirmwareUnavailable   = errors.New("firmware is unavailable")
+	ErrNotFound                   = errors.New("router not found")
+	ErrConfigurationRequired      = errors.New("router configuration is required")
+	ErrInvalidModel               = errors.New("router model is invalid")
+	ErrInvalidHardware            = errors.New("hardware version is invalid")
+	ErrIncompatibleModel          = errors.New("router model is incompatible")
+	ErrIncompatibleHardware       = errors.New("hardware version is incompatible")
+	ErrFirmwareUnavailable        = errors.New("firmware is unavailable")
+	ErrScopeConfigurationRequired = errors.New("activation scope configuration is required")
 )
 
 type Repository struct{ pool *pgxpool.Pool }
@@ -202,13 +203,13 @@ func (r *Repository) SaveConfiguration(ctx context.Context, tenantID, routerID s
 		network := configuration.Network
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO acs.router_network_settings
-				(tenant_id, router_id, dhcp_enabled, dhcp_start, dhcp_end, dhcp_lease_seconds, dns_primary, dns_secondary)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+				(tenant_id,router_id,dhcp_enabled,dhcp_start,dhcp_end,dhcp_gateway,dhcp_subnet_mask,dhcp_lease_seconds,dns_primary,dns_secondary)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 			ON CONFLICT (router_id) DO UPDATE SET dhcp_enabled=EXCLUDED.dhcp_enabled,
-				dhcp_start=EXCLUDED.dhcp_start, dhcp_end=EXCLUDED.dhcp_end,
+				dhcp_start=EXCLUDED.dhcp_start,dhcp_end=EXCLUDED.dhcp_end,dhcp_gateway=EXCLUDED.dhcp_gateway,dhcp_subnet_mask=EXCLUDED.dhcp_subnet_mask,
 				dhcp_lease_seconds=EXCLUDED.dhcp_lease_seconds, dns_primary=EXCLUDED.dns_primary,
 				dns_secondary=EXCLUDED.dns_secondary`, tenantID, routerID, network.DHCPEnabled,
-			network.DHCPStart, network.DHCPEnd, network.DHCPLeaseSeconds, network.DNSPrimary, network.DNSSecondary); err != nil {
+			network.DHCPStart, network.DHCPEnd, network.DHCPGateway, network.DHCPSubnetMask, network.DHCPLeaseSeconds, network.DNSPrimary, network.DNSSecondary); err != nil {
 			return fmt.Errorf("save network configuration: %w", err)
 		}
 		return tx.QueryRow(ctx, `UPDATE acs.routers SET configuration_version = configuration_version + 1 WHERE id = $1 RETURNING configuration_version`, routerID).Scan(&result.Version)
@@ -216,7 +217,7 @@ func (r *Repository) SaveConfiguration(ctx context.Context, tenantID, routerID s
 	return result, err
 }
 
-func (r *Repository) CreateActivationCommand(ctx context.Context, tenantID, routerID, userID, idempotencyKey string) (Command, error) {
+func (r *Repository) CreateActivationCommand(ctx context.Context, tenantID, routerID, userID, idempotencyKey, scope string, overrides ActivationOverrides) (Command, error) {
 	var command Command
 	err := database.InTenantTransaction(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
 		var version int64
@@ -227,6 +228,16 @@ func (r *Repository) CreateActivationCommand(ctx context.Context, tenantID, rout
 		}
 		if version == 0 {
 			return ErrConfigurationRequired
+		}
+		hasDNSOverrides := scope == "DNS" && (overrides.DNSPrimary != nil || overrides.DNSSecondary != nil)
+		hasDHCPOverrides := scope == "DHCP" && (overrides.DHCPGateway != nil || overrides.DHCPSubnetMask != nil)
+		if hasDNSOverrides || hasDHCPOverrides {
+			if _, err := tx.Exec(ctx, `UPDATE acs.router_network_settings SET dns_primary=COALESCE($3::inet,dns_primary),dns_secondary=COALESCE($4::inet,dns_secondary),dhcp_gateway=COALESCE($5::inet,dhcp_gateway),dhcp_subnet_mask=COALESCE($6::inet,dhcp_subnet_mask) WHERE tenant_id=$1 AND router_id=$2`, tenantID, routerID, overrides.DNSPrimary, overrides.DNSSecondary, overrides.DHCPGateway, overrides.DHCPSubnetMask); err != nil {
+				return fmt.Errorf("update desired network overrides: %w", err)
+			}
+			if err := tx.QueryRow(ctx, `UPDATE acs.routers SET configuration_version=configuration_version+1 WHERE tenant_id=$1 AND id=$2 RETURNING configuration_version`, tenantID, routerID).Scan(&version); err != nil {
+				return fmt.Errorf("version desired DNS: %w", err)
+			}
 		}
 		wifi := make([]map[string]any, 0)
 		rows, err := tx.Query(ctx, `SELECT band, ssid, encrypted_password, security_mode, channel, channel_mode, bandwidth_mhz, enabled FROM acs.router_wifi_radios WHERE tenant_id=$1 AND router_id=$2 ORDER BY band`, tenantID, routerID)
@@ -249,12 +260,34 @@ func (r *Repository) CreateActivationCommand(ctx context.Context, tenantID, rout
 			return fmt.Errorf("iterate Wi-Fi configuration: %w", err)
 		}
 		var dhcpEnabled bool
-		var dhcpStart, dhcpEnd, dnsPrimary, dnsSecondary *string
+		var dhcpStart, dhcpEnd, dhcpGateway, dhcpSubnetMask, dnsPrimary, dnsSecondary *string
 		var lease *int
-		if err := tx.QueryRow(ctx, `SELECT host(dhcp_start), host(dhcp_end), dhcp_enabled, dhcp_lease_seconds, host(dns_primary), host(dns_secondary) FROM acs.router_network_settings WHERE tenant_id=$1 AND router_id=$2`, tenantID, routerID).Scan(&dhcpStart, &dhcpEnd, &dhcpEnabled, &lease, &dnsPrimary, &dnsSecondary); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT host(dhcp_start),host(dhcp_end),host(dhcp_gateway),host(dhcp_subnet_mask),dhcp_enabled,dhcp_lease_seconds,host(dns_primary),host(dns_secondary) FROM acs.router_network_settings WHERE tenant_id=$1 AND router_id=$2`, tenantID, routerID).Scan(&dhcpStart, &dhcpEnd, &dhcpGateway, &dhcpSubnetMask, &dhcpEnabled, &lease, &dnsPrimary, &dnsSecondary); err != nil {
 			return fmt.Errorf("load network configuration: %w", err)
 		}
-		parameters := map[string]any{"configuration_version": version, "configuration": map[string]any{"wifi": wifi, "network": map[string]any{"dhcp_enabled": dhcpEnabled, "dhcp_start": dhcpStart, "dhcp_end": dhcpEnd, "dhcp_lease_seconds": lease, "dns_primary": dnsPrimary, "dns_secondary": dnsSecondary}}}
+		if scope == "WIFI_24" || scope == "WIFI_5" {
+			wanted := "2.4GHZ"
+			if scope == "WIFI_5" {
+				wanted = "5GHZ"
+			}
+			found := false
+			for _, radio := range wifi {
+				if radio["band"] == wanted {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return ErrScopeConfigurationRequired
+			}
+		}
+		if scope == "DHCP" && (dhcpStart == nil || dhcpEnd == nil || dhcpGateway == nil || dhcpSubnetMask == nil) {
+			return ErrScopeConfigurationRequired
+		}
+		if scope == "DNS" && dnsPrimary == nil && dnsSecondary == nil {
+			return ErrScopeConfigurationRequired
+		}
+		parameters := map[string]any{"configuration_version": version, "scope": scope, "configuration": map[string]any{"wifi": wifi, "network": map[string]any{"dhcp_enabled": dhcpEnabled, "dhcp_start": dhcpStart, "dhcp_end": dhcpEnd, "dhcp_gateway": dhcpGateway, "dhcp_subnet_mask": dhcpSubnetMask, "dhcp_lease_seconds": lease, "dns_primary": dnsPrimary, "dns_secondary": dnsSecondary}}}
 		encodedParameters, _ := json.Marshal(parameters)
 		var key any
 		if idempotencyKey != "" {
@@ -274,7 +307,7 @@ func (r *Repository) CreateActivationCommand(ctx context.Context, tenantID, rout
 		if err := json.Unmarshal(encodedParameters, &command.Parameters); err != nil {
 			return err
 		}
-		command.Parameters = map[string]any{"configuration_version": version}
+		command.Parameters = map[string]any{"configuration_version": version, "scope": scope}
 		return nil
 	})
 	return command, err

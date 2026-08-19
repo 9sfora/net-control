@@ -22,6 +22,8 @@ type Store interface {
 	GetModel(context.Context, string, string) (RouterModel, error)
 	SaveModel(context.Context, string, string, RouterModelInput) (RouterModel, error)
 	SaveHardwareVersion(context.Context, string, string, string, HardwareVersionInput) (HardwareVersion, error)
+	ListCWMPParameters(context.Context, string, string) ([]CWMPParameter, error)
+	ReplaceCWMPParameters(context.Context, string, string, []CWMPParameterInput) ([]CWMPParameter, error)
 }
 type Handler struct {
 	store  Store
@@ -47,6 +49,49 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("PUT /api/v1/acs/router-models/{id}", manage(http.HandlerFunc(h.updateModel)))
 	mux.Handle("POST /api/v1/acs/router-models/{id}/hardware-versions", manage(http.HandlerFunc(h.createHardware)))
 	mux.Handle("PUT /api/v1/acs/router-models/{id}/hardware-versions/{version_id}", manage(http.HandlerFunc(h.updateHardware)))
+	mux.Handle("GET /api/v1/acs/router-models/{id}/cwmp-parameters", read(http.HandlerFunc(h.listCWMPParameters)))
+	mux.Handle("PUT /api/v1/acs/router-models/{id}/cwmp-parameters", manage(http.HandlerFunc(h.replaceCWMPParameters)))
+}
+func (h *Handler) listCWMPParameters(w http.ResponseWriter, r *http.Request) {
+	modelID := r.PathValue("id")
+	if !validID(w, r, modelID) {
+		return
+	}
+	p, _ := auth.PrincipalFromContext(r.Context())
+	items, err := h.store.ListCWMPParameters(r.Context(), p.TenantID, modelID)
+	if writeCatalogError(w, r, err) {
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"data": items})
+}
+func (h *Handler) replaceCWMPParameters(w http.ResponseWriter, r *http.Request) {
+	modelID := r.PathValue("id")
+	if !validID(w, r, modelID) {
+		return
+	}
+	var input CWMPParametersInput
+	if !decode(w, r, &input) {
+		return
+	}
+	seen := make(map[string]bool, len(input.Parameters))
+	validTypes := map[string]bool{"string": true, "boolean": true, "int": true, "unsignedInt": true}
+	for index := range input.Parameters {
+		item := &input.Parameters[index]
+		item.ParameterKey = strings.ToLower(strings.TrimSpace(item.ParameterKey))
+		item.ParameterName = strings.TrimSpace(item.ParameterName)
+		item.XSDType = strings.TrimSpace(item.XSDType)
+		if item.ParameterKey == "" || len(item.ParameterKey) > 100 || item.ParameterName == "" || len(item.ParameterName) > 500 || !validTypes[item.XSDType] || seen[item.ParameterKey] {
+			validation(w, r, "Parameters require unique parameter_key, parameter_name and a valid xsd_type")
+			return
+		}
+		seen[item.ParameterKey] = true
+	}
+	p, _ := auth.PrincipalFromContext(r.Context())
+	items, err := h.store.ReplaceCWMPParameters(r.Context(), p.TenantID, modelID, input.Parameters)
+	if writeCatalogError(w, r, err) {
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"data": items})
 }
 func (h *Handler) listManufacturers(w http.ResponseWriter, r *http.Request) {
 	p, _ := auth.PrincipalFromContext(r.Context())

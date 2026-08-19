@@ -4,3 +4,4 @@
 backend/bin/
 backend/coverage.out
 postgres/data/
+test-ignore.md

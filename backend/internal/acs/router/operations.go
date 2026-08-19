@@ -83,7 +83,7 @@ func (r *Repository) GetRouter(ctx context.Context, tenantID, routerID string) (
 		wifiRows.Close()
 
 		var network NetworkConfiguration
-		err = tx.QueryRow(ctx, `SELECT dhcp_enabled,host(dhcp_start),host(dhcp_end),dhcp_lease_seconds,host(dns_primary),host(dns_secondary) FROM acs.router_network_settings WHERE tenant_id=$1 AND router_id=$2`, tenantID, routerID).Scan(&network.DHCPEnabled, &network.DHCPStart, &network.DHCPEnd, &network.DHCPLeaseSeconds, &network.DNSPrimary, &network.DNSSecondary)
+		err = tx.QueryRow(ctx, `SELECT dhcp_enabled,host(dhcp_start),host(dhcp_end),host(dhcp_gateway),host(dhcp_subnet_mask),dhcp_lease_seconds,host(dns_primary),host(dns_secondary) FROM acs.router_network_settings WHERE tenant_id=$1 AND router_id=$2`, tenantID, routerID).Scan(&network.DHCPEnabled, &network.DHCPStart, &network.DHCPEnd, &network.DHCPGateway, &network.DHCPSubnetMask, &network.DHCPLeaseSeconds, &network.DNSPrimary, &network.DNSSecondary)
 		if err == nil {
 			detail.Network = &network
 		} else if !errors.Is(err, pgx.ErrNoRows) {

@@ -81,7 +81,7 @@ func (h *Handler) configure(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	principal, _ := auth.PrincipalFromContext(r.Context())
-	configured, err := h.store.Configure(r.Context(), principal.TenantID, unknownID, ConfigureUnknownInput{Name: strings.TrimSpace(input.Name), RouterModelID: input.RouterModelID, HardwareVersionID: input.HardwareVersionID})
+	configured, err := h.store.Configure(r.Context(), principal.TenantID, unknownID, ConfigureUnknownInput{Name: strings.TrimSpace(input.Name), RouterModelID: input.RouterModelID, HardwareVersionID: input.HardwareVersionID, CreatedBy: principal.UserID})
 	if errors.Is(err, ErrNotFound) {
 		httpserver.WriteError(w, r, http.StatusNotFound, "ACS_UNKNOWN_ROUTER_NOT_FOUND", "Unknown router not found")
 		return

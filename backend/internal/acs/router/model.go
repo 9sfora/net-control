@@ -102,4 +102,5 @@ type ConfigureUnknownInput struct {
 	Name              string
 	RouterModelID     string
 	HardwareVersionID *string
+	CreatedBy         string
 }

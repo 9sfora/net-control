@@ -127,7 +127,8 @@ func (r *Repository) Configure(ctx context.Context, tenantID, unknownID string, 
 			return fmt.Errorf("lock unknown router: %w", err)
 		}
 		var modelOUI, modelProductClass *string
-		if err := tx.QueryRow(ctx, `SELECT oui,product_class FROM acs.router_models WHERE tenant_id=$1 AND id=$2 AND active`, tenantID, input.RouterModelID).Scan(&modelOUI, &modelProductClass); errors.Is(err, pgx.ErrNoRows) {
+		var dataModelID string
+		if err := tx.QueryRow(ctx, `SELECT m.oui,m.product_class,m.tr069_data_model_id FROM acs.router_models m JOIN acs.tr069_data_models d ON d.tenant_id=m.tenant_id AND d.id=m.tr069_data_model_id AND d.active WHERE m.tenant_id=$1 AND m.id=$2 AND m.active`, tenantID, input.RouterModelID).Scan(&modelOUI, &modelProductClass, &dataModelID); errors.Is(err, pgx.ErrNoRows) {
 			return ErrInvalidModel
 		} else if err != nil {
 			return fmt.Errorf("find router model: %w", err)
@@ -164,6 +165,44 @@ func (r *Repository) Configure(ctx context.Context, tenantID, unknownID string, 
 			&configured.FirstSeenAt, &configured.LastSeenAt, &configured.CreatedAt)
 		if err != nil {
 			return fmt.Errorf("create configured router: %w", err)
+		}
+		parameters := make([]map[string]string, 0)
+		seenRoots := make(map[string]bool)
+		sourceParameterCount := 0
+		rows, err := tx.Query(ctx, `SELECT parameter_path,value_type FROM acs.tr069_data_model_commands WHERE tenant_id=$1 AND data_model_id=$2 AND active ORDER BY parameter_path`, tenantID, dataModelID)
+		if err != nil {
+			return fmt.Errorf("load TR-069 data model commands: %w", err)
+		}
+		for rows.Next() {
+			var name, valueType string
+			if err := rows.Scan(&name, &valueType); err != nil {
+				rows.Close()
+				return fmt.Errorf("scan TR-069 data model command: %w", err)
+			}
+			sourceParameterCount++
+			separator := strings.Index(name, ".")
+			if separator <= 0 {
+				continue
+			}
+			root := name[:separator+1]
+			if !seenRoots[root] {
+				seenRoots[root] = true
+				parameters = append(parameters, map[string]string{"name": root, "type": valueType})
+			}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("iterate TR-069 data model commands: %w", err)
+		}
+		if len(parameters) == 0 {
+			return ErrInvalidModel
+		}
+		encodedParameters, err := json.Marshal(map[string]any{"data_model_id": dataModelID, "source_parameter_count": sourceParameterCount, "parameters": parameters})
+		if err != nil {
+			return fmt.Errorf("encode sync parameters: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO acs.router_commands(tenant_id,router_id,created_by,type,parameters,priority) VALUES($1,$2,$3,'SYNC',$4,'HIGH')`, tenantID, configured.ID, input.CreatedBy, encodedParameters); err != nil {
+			return fmt.Errorf("create initial sync command: %w", err)
 		}
 		if _, err := tx.Exec(ctx, `
 			UPDATE acs.router_sessions

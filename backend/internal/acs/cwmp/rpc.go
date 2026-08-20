@@ -8,9 +8,9 @@ import (
 )
 
 type ParameterValue struct {
-	Name  string
-	Value string
-	Type  string
+	Name  string `json:"name"`
+	Value string `json:"value"`
+	Type  string `json:"type"`
 }
 
 type OutboundCommand struct {
@@ -36,13 +36,34 @@ type CommandResult struct {
 	FaultCode      string
 	FaultString    string
 	Raw            string
+	Parameters     []ParameterValue
 }
 
 func EncodeCommand(command OutboundCommand) []byte {
 	if command.Type == "UPDATE_FIRMWARE" {
 		return Download(command)
 	}
+	if command.Type == "SYNC" {
+		return GetParameterValues(command)
+	}
 	return SetParameterValues(command)
+}
+
+func GetParameterValues(command OutboundCommand) []byte {
+	var body bytes.Buffer
+	body.WriteString(`<?xml version="1.0" encoding="UTF-8"?>`)
+	body.WriteString(`<soap-env:Envelope xmlns:soap-env="http://schemas.xmlsoap.org/soap/envelope/" xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/" xmlns:cwmp="urn:dslforum-org:cwmp-1-2"><soap-env:Header><cwmp:ID soap-env:mustUnderstand="1">`)
+	escape(&body, command.AttemptID)
+	body.WriteString(`</cwmp:ID></soap-env:Header><soap-env:Body><cwmp:GetParameterValues><ParameterNames soap-enc:arrayType="xsd:string[`)
+	body.WriteString(fmt.Sprintf("%d", len(command.Parameters)))
+	body.WriteString(`]" xmlns:xsd="http://www.w3.org/2001/XMLSchema">`)
+	for _, parameter := range command.Parameters {
+		body.WriteString(`<string>`)
+		escape(&body, parameter.Name)
+		body.WriteString(`</string>`)
+	}
+	body.WriteString(`</ParameterNames></cwmp:GetParameterValues></soap-env:Body></soap-env:Envelope>`)
+	return body.Bytes()
 }
 
 func Download(command OutboundCommand) []byte {
@@ -89,7 +110,16 @@ func SetParameterValues(command OutboundCommand) []byte {
 func ParseCommandResult(payload []byte) (CommandResult, error) {
 	var message struct {
 		Body struct {
-			Response         *struct{} `xml:"SetParameterValuesResponse"`
+			Response    *struct{} `xml:"SetParameterValuesResponse"`
+			GetResponse *struct {
+				Parameters []struct {
+					Name  string `xml:"Name"`
+					Value struct {
+						Type  string `xml:"type,attr"`
+						Value string `xml:",chardata"`
+					} `xml:"Value"`
+				} `xml:"ParameterList>ParameterValueStruct"`
+			} `xml:"GetParameterValuesResponse"`
 			DownloadResponse *struct {
 				Status string `xml:"Status"`
 			} `xml:"DownloadResponse"`
@@ -118,6 +148,18 @@ func ParseCommandResult(payload []byte) (CommandResult, error) {
 	result := CommandResult{Raw: string(payload)}
 	if message.Body.Response != nil {
 		result.Kind = "SET_PARAMETER_VALUES"
+		return result, nil
+	}
+	if message.Body.GetResponse != nil {
+		result.Kind = "GET_PARAMETER_VALUES"
+		result.Parameters = make([]ParameterValue, 0, len(message.Body.GetResponse.Parameters))
+		for _, parameter := range message.Body.GetResponse.Parameters {
+			valueType := parameter.Value.Type
+			if separator := strings.Index(valueType, ":"); separator >= 0 {
+				valueType = valueType[separator+1:]
+			}
+			result.Parameters = append(result.Parameters, ParameterValue{Name: parameter.Name, Value: parameter.Value.Value, Type: valueType})
+		}
 		return result, nil
 	}
 	if message.Body.DownloadResponse != nil {

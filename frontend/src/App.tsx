@@ -134,11 +134,25 @@ type Manufacturer = {
   active: boolean;
 };
 type HardwareVersion = { id: string; version: string; active: boolean };
+type TR069Command = {
+  id?: string;
+  parameter_path: string;
+  value_type: string;
+  active: boolean;
+};
+type TR069DataModel = {
+  id: string;
+  name: string;
+  active: boolean;
+  commands: TR069Command[];
+};
 type Model = {
   id: string;
   manufacturer_id: string;
   name: string;
   manufacturer_name: string;
+  tr069_data_model_id?: string;
+  tr069_data_model_name?: string;
   manufacturer_model_name?: string;
   protocol: string;
   product_class?: string;
@@ -785,6 +799,9 @@ function Discovery({
     modelsState = useData<Envelope<Model[]>>("/api/v1/acs/router-models"),
     manufacturersState = useData<Envelope<Manufacturer[]>>(
       "/api/v1/acs/manufacturers",
+    ),
+    dataModelsState = useData<Envelope<TR069DataModel[]>>(
+      "/api/v1/acs/tr069-data-models",
     );
   const rows = state.data?.data || [];
   const [modelSource, setModelSource] = useState<UnknownRouter | undefined>(),
@@ -826,6 +843,7 @@ function Discovery({
             state.reload();
             modelsState.reload();
             manufacturersState.reload();
+            dataModelsState.reload();
           }}
         >
           <RefreshCw size={16} /> Atualizar
@@ -887,6 +905,7 @@ function Discovery({
           item={null}
           initial={modelDraft(modelSource)}
           manufacturers={manufacturersState.data?.data || []}
+          dataModels={dataModelsState.data?.data || []}
           onClose={() => setModelSource(undefined)}
           onSaved={() => {
             setModelSource(undefined);
@@ -965,7 +984,10 @@ function Commands({ canCancel }: { canCancel: boolean }) {
               <td>
                 <strong>{r.router_name}</strong>
               </td>
-              <td>{label[r.type] || r.type}</td>
+              <td>
+                {label[r.type] || r.type}
+                {r.error_message && <small>{r.error_message}</small>}
+              </td>
               <td>{formatDate(r.created_at)}</td>
               <td>{r.attempts_count ?? "—"}</td>
               <td>
@@ -992,32 +1014,49 @@ function Commands({ canCancel }: { canCancel: boolean }) {
   );
 }
 function Catalog({ canManage }: { canManage: boolean }) {
-  const [tab, setTab] = useState<"models" | "manufacturers">("models"),
+  const [tab, setTab] = useState<"models" | "manufacturers" | "data-models">(
+      "models",
+    ),
     [modelModal, setModelModal] = useState<Model | null | undefined>(undefined),
     [manufacturerModal, setManufacturerModal] = useState<
       Manufacturer | null | undefined
+    >(undefined),
+    [dataModelModal, setDataModelModal] = useState<
+      TR069DataModel | null | undefined
     >(undefined);
   const modelsState = useData<Envelope<Model[]>>("/api/v1/acs/router-models"),
     manufacturersState = useData<Envelope<Manufacturer[]>>(
       "/api/v1/acs/manufacturers",
+    ),
+    dataModelsState = useData<Envelope<TR069DataModel[]>>(
+      "/api/v1/acs/tr069-data-models",
     );
-  const state = tab === "models" ? modelsState : manufacturersState,
+  const state =
+      tab === "models"
+        ? modelsState
+        : tab === "manufacturers"
+          ? manufacturersState
+          : dataModelsState,
     rows = state.data?.data || [];
   function reload() {
-    tab === "models" ? modelsState.reload() : manufacturersState.reload();
+    if (tab === "models") modelsState.reload();
+    else if (tab === "manufacturers") manufacturersState.reload();
+    else dataModelsState.reload();
   }
   async function remove(
-    kind: "model" | "manufacturer",
+    kind: "model" | "manufacturer" | "data-model",
     id: string,
     name: string,
   ) {
     if (!confirm(`Excluir “${name}”?`)) return;
     try {
       await api(
-        `/api/v1/acs/${kind === "model" ? "router-models" : "manufacturers"}/${id}`,
+        `/api/v1/acs/${kind === "model" ? "router-models" : kind === "manufacturer" ? "manufacturers" : "tr069-data-models"}/${id}`,
         { method: "DELETE" },
       );
-      kind === "model" ? modelsState.reload() : manufacturersState.reload();
+      if (kind === "model") modelsState.reload();
+      else if (kind === "manufacturer") manufacturersState.reload();
+      else dataModelsState.reload();
     } catch (e) {
       alert(e instanceof Error ? e.message : "Erro ao excluir");
     }
@@ -1041,12 +1080,18 @@ function Catalog({ canManage }: { canManage: boolean }) {
       {canManage && (
         <button
           className="button primary"
-          onClick={() =>
-            tab === "models" ? setModelModal(null) : setManufacturerModal(null)
-          }
+          onClick={() => {
+            if (tab === "models") setModelModal(null);
+            else if (tab === "manufacturers") setManufacturerModal(null);
+            else setDataModelModal(null);
+          }}
         >
           <Plus size={16} /> Adicionar{" "}
-          {tab === "models" ? "modelo" : "fabricante"}
+          {tab === "models"
+            ? "modelo"
+            : tab === "manufacturers"
+              ? "fabricante"
+              : "modelo de dados"}
         </button>
       )}
     </div>
@@ -1069,6 +1114,12 @@ function Catalog({ canManage }: { canManage: boolean }) {
           onClick={() => setTab("manufacturers")}
         >
           Fabricantes
+        </button>
+        <button
+          className={tab === "data-models" ? "active" : ""}
+          onClick={() => setTab("data-models")}
+        >
+          Modelos de dados TR-069
         </button>
       </div>
       <State {...state} empty={!rows.length} reload={reload} />
@@ -1128,7 +1179,7 @@ function Catalog({ canManage }: { canManage: boolean }) {
               </tr>
             ))}
           </Table>
-        ) : (
+        ) : tab === "manufacturers" ? (
           <Table headers={["Fabricante", "Descrição", "Status", "Ações"]}>
             {(rows as Manufacturer[]).map((m) => (
               <tr
@@ -1162,6 +1213,42 @@ function Catalog({ canManage }: { canManage: boolean }) {
               </tr>
             ))}
           </Table>
+        ) : (
+          <Table headers={["Nome", "Comandos", "Status", "Ações"]}>
+            {(rows as TR069DataModel[]).map((dataModel) => (
+              <tr
+                className={canManage ? "clickable-row" : ""}
+                key={dataModel.id}
+                onClick={() => canManage && setDataModelModal(dataModel)}
+              >
+                <td>
+                  <strong>{dataModel.name}</strong>
+                </td>
+                <td>{dataModel.commands.length}</td>
+                <td>
+                  <Badge value={dataModel.active ? "ACTIVE" : "INACTIVE"} />
+                </td>
+                <td>
+                  {canManage && (
+                    <div
+                      className="row-actions"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <button
+                        className="danger"
+                        title="Excluir"
+                        onClick={() =>
+                          remove("data-model", dataModel.id, dataModel.name)
+                        }
+                      >
+                        <Trash2 />
+                      </button>
+                    </div>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </Table>
         ))}
       {manufacturerModal !== undefined && (
         <ManufacturerModal
@@ -1177,6 +1264,7 @@ function Catalog({ canManage }: { canManage: boolean }) {
         <ModelModal
           item={modelModal}
           manufacturers={manufacturersState.data?.data || []}
+          dataModels={dataModelsState.data?.data || []}
           onClose={() => setModelModal(undefined)}
           onSaved={() => {
             setModelModal(undefined);
@@ -1184,7 +1272,269 @@ function Catalog({ canManage }: { canManage: boolean }) {
           }}
         />
       )}
+      {dataModelModal !== undefined && (
+        <TR069DataModelModal
+          item={dataModelModal}
+          onClose={() => setDataModelModal(undefined)}
+          onSaved={() => {
+            setDataModelModal(undefined);
+            dataModelsState.reload();
+          }}
+        />
+      )}
     </Page>
+  );
+}
+
+const tr069ValueTypes = [
+  "string",
+  "boolean",
+  "int",
+  "unsignedInt",
+  "dateTime",
+  "base64",
+  "hexBinary",
+];
+
+function parseCSVRow(row: string): string[] {
+  const fields: string[] = [];
+  let field = "";
+  let quoted = false;
+  for (let index = 0; index < row.length; index++) {
+    const character = row[index];
+    if (character === '"') {
+      if (quoted && row[index + 1] === '"') {
+        field += '"';
+        index++;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (character === "," && !quoted) {
+      fields.push(field.trim());
+      field = "";
+    } else {
+      field += character;
+    }
+  }
+  if (quoted) throw new Error("Há aspas não fechadas no arquivo CSV.");
+  fields.push(field.trim());
+  return fields;
+}
+
+function TR069DataModelModal({
+  item,
+  onClose,
+  onSaved,
+}: {
+  item: TR069DataModel | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [name, setName] = useState(item?.name || ""),
+    [active, setActive] = useState(item?.active ?? true),
+    [commands, setCommands] = useState<TR069Command[]>(
+      item?.commands || [
+        { parameter_path: "", value_type: "string", active: true },
+      ],
+    ),
+    [saving, setSaving] = useState(false),
+    [error, setError] = useState(""),
+    [importMessage, setImportMessage] = useState("");
+  function updateCommand(
+    index: number,
+    field: "parameter_path" | "value_type",
+    value: string,
+  ) {
+    setCommands((current) =>
+      current.map((command, commandIndex) =>
+        commandIndex === index ? { ...command, [field]: value } : command,
+      ),
+    );
+  }
+  async function importCSV(file?: File) {
+    if (!file) return;
+    setError("");
+    setImportMessage("");
+    try {
+      const content = (await file.text()).replace(/^\uFEFF/, "");
+      const imported: TR069Command[] = [];
+      const seen = new Set<string>();
+      for (const [index, rawRow] of content.split(/\r?\n/).entries()) {
+        if (!rawRow.trim()) continue;
+        const fields = parseCSVRow(rawRow);
+        if (fields.length !== 2 || !fields[0] || !fields[1]) {
+          throw new Error(
+            `Linha ${index + 1} inválida. Use o formato comando,tipo.`,
+          );
+        }
+        const [parameterPath, valueType] = fields;
+        if (!tr069ValueTypes.includes(valueType)) {
+          throw new Error(
+            `Tipo “${valueType}” inválido na linha ${index + 1}.`,
+          );
+        }
+        const key = parameterPath.toLowerCase();
+        if (seen.has(key)) {
+          throw new Error(`Comando duplicado na linha ${index + 1}.`);
+        }
+        seen.add(key);
+        imported.push({
+          parameter_path: parameterPath,
+          value_type: valueType,
+          active: true,
+        });
+      }
+      if (!imported.length) throw new Error("O arquivo CSV está vazio.");
+      const currentCommands = commands.filter((command) =>
+        command.parameter_path.trim(),
+      );
+      const currentKeys = new Set(
+        currentCommands.map((command) => command.parameter_path.toLowerCase()),
+      );
+      const duplicate = imported.find((command) =>
+        currentKeys.has(command.parameter_path.toLowerCase()),
+      );
+      if (duplicate) {
+        throw new Error(
+          `O comando “${duplicate.parameter_path}” já está cadastrado.`,
+        );
+      }
+      setCommands([...currentCommands, ...imported]);
+      setImportMessage(
+        `${imported.length} comando${imported.length === 1 ? " importado" : "s importados"}. Salve para gravar no banco.`,
+      );
+    } catch (importError) {
+      setError(
+        importError instanceof Error
+          ? importError.message
+          : "Não foi possível importar o CSV.",
+      );
+    }
+  }
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      await api(
+        item
+          ? `/api/v1/acs/tr069-data-models/${item.id}`
+          : "/api/v1/acs/tr069-data-models",
+        {
+          method: item ? "PUT" : "POST",
+          body: JSON.stringify({ name, active, commands }),
+        },
+      );
+      onSaved();
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Não foi possível salvar.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+  return (
+    <CatalogModal
+      title={item ? "Editar modelo de dados TR-069" : "Adicionar modelo de dados TR-069"}
+      description="Cadastre o nome e os parâmetros que o ACS deve coletar."
+      saving={saving}
+      error={error}
+      onClose={onClose}
+      onSubmit={submit}
+    >
+      <Field label="Nome">
+        <input
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          placeholder="Ex.: tr-181"
+          maxLength={100}
+          required
+          autoFocus
+        />
+      </Field>
+      <div className="option-group">
+        <span>Comandos / parâmetros</span>
+        <label className="file-picker">
+          <Upload size={16} />
+          <span>Importar CSV sem cabeçalho (comando,tipo)</span>
+          <input
+            type="file"
+            accept=".csv,text/csv,text/plain"
+            onChange={(event) => {
+              void importCSV(event.target.files?.[0]);
+              event.target.value = "";
+            }}
+          />
+        </label>
+        {importMessage && <p className="import-status">{importMessage}</p>}
+        {commands.map((command, index) => (
+          <div className="form-grid" key={command.id || index}>
+            <Field label="Caminho">
+              <input
+                value={command.parameter_path}
+                onChange={(event) =>
+                  updateCommand(index, "parameter_path", event.target.value)
+                }
+                placeholder="Device.DeviceInfo.HardwareVersion"
+                maxLength={500}
+                required
+              />
+            </Field>
+            <Field label="Tipo">
+              <select
+                value={command.value_type}
+                onChange={(event) =>
+                  updateCommand(index, "value_type", event.target.value)
+                }
+              >
+                {tr069ValueTypes.map((valueType) => (
+                  <option key={valueType} value={valueType}>
+                    {valueType}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <button
+              className="button danger-button"
+              type="button"
+              title="Remover comando"
+              onClick={() =>
+                setCommands((current) =>
+                  current.filter((_, commandIndex) => commandIndex !== index),
+                )
+              }
+            >
+              <Trash2 size={16} /> Remover
+            </button>
+          </div>
+        ))}
+        <button
+          className="button"
+          type="button"
+          onClick={() =>
+            setCommands((current) => [
+              ...current,
+              { parameter_path: "", value_type: "string", active: true },
+            ])
+          }
+        >
+          <Plus size={16} /> Adicionar comando
+        </button>
+      </div>
+      <div className="check-row">
+        <label>
+          <input
+            type="checkbox"
+            checked={active}
+            onChange={(event) => setActive(event.target.checked)}
+          />{" "}
+          Ativo
+        </label>
+      </div>
+    </CatalogModal>
   );
 }
 
@@ -1270,18 +1620,23 @@ function ModelModal({
   item,
   initial,
   manufacturers,
+  dataModels,
   onClose,
   onSaved,
 }: {
   item: Model | null;
   initial?: Partial<Model>;
   manufacturers: Manufacturer[];
+  dataModels: TR069DataModel[];
   onClose: () => void;
   onSaved: () => void;
 }) {
   const source = item || initial;
   const [manufacturerId, setManufacturer] = useState(
       source?.manufacturer_id || "",
+    ),
+    [dataModelId, setDataModelId] = useState(
+      source?.tr069_data_model_id || "",
     ),
     [name, setName] = useState(source?.name || ""),
     [manufacturerName, setManufacturerName] = useState(
@@ -1312,6 +1667,7 @@ function ModelModal({
     setError("");
     const body = {
       manufacturer_id: manufacturerId,
+      tr069_data_model_id: dataModelId,
       name,
       manufacturer_model_name: manufacturerName || null,
       supports_wifi_2_4: wifi24,
@@ -1374,6 +1730,27 @@ function ModelModal({
               ))}
           </select>
         </Field>
+        <Field label="Modelo de dados TR-069">
+          <select
+            value={dataModelId}
+            onChange={(event) => setDataModelId(event.target.value)}
+            required
+          >
+            <option value="">Selecione</option>
+            {dataModels
+              .filter(
+                (dataModel) =>
+                  dataModel.active || dataModel.id === dataModelId,
+              )
+              .map((dataModel) => (
+                <option key={dataModel.id} value={dataModel.id}>
+                  {dataModel.name}
+                </option>
+              ))}
+          </select>
+        </Field>
+      </div>
+      <div className="form-grid">
         <Field label="Nome do modelo">
           <input
             value={name}

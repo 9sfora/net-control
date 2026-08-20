@@ -17,6 +17,29 @@ func TestSetParameterValues(t *testing.T) {
 	}
 }
 
+func TestGetParameterValues(t *testing.T) {
+	payload := string(GetParameterValues(OutboundCommand{
+		AttemptID:  "attempt-1",
+		Parameters: []ParameterValue{{Name: "Device.DeviceInfo.HardwareVersion"}},
+	}))
+	for _, expected := range []string{"GetParameterValues", "attempt-1", "Device.DeviceInfo.HardwareVersion", "xsd:string[1]"} {
+		if !strings.Contains(payload, expected) {
+			t.Fatalf("expected %q in %s", expected, payload)
+		}
+	}
+}
+
+func TestParseGetParameterValuesResponse(t *testing.T) {
+	payload := []byte(`<Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><Body><GetParameterValuesResponse><ParameterList><ParameterValueStruct><Name>Device.DeviceInfo.HardwareVersion</Name><Value xsi:type="xsd:string">V1</Value></ParameterValueStruct></ParameterList></GetParameterValuesResponse></Body></Envelope>`)
+	result, err := ParseCommandResult(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Kind != "GET_PARAMETER_VALUES" || len(result.Parameters) != 1 || result.Parameters[0].Name != "Device.DeviceInfo.HardwareVersion" || result.Parameters[0].Value != "V1" || result.Parameters[0].Type != "string" {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+}
+
 func TestParseCommandResult(t *testing.T) {
 	success := []byte(`<Envelope><Body><SetParameterValuesResponse><Status>0</Status></SetParameterValuesResponse></Body></Envelope>`)
 	result, err := ParseCommandResult(success)

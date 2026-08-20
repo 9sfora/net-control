@@ -23,6 +23,10 @@ type Store interface {
 	GetModel(context.Context, string, string) (RouterModel, error)
 	SaveModel(context.Context, string, string, RouterModelInput) (RouterModel, error)
 	DeleteModel(context.Context, string, string) error
+	ListTR069DataModels(context.Context, string) ([]TR069DataModel, error)
+	GetTR069DataModel(context.Context, string, string) (TR069DataModel, error)
+	SaveTR069DataModel(context.Context, string, string, TR069DataModelInput) (TR069DataModel, error)
+	DeleteTR069DataModel(context.Context, string, string) error
 	SaveHardwareVersion(context.Context, string, string, string, HardwareVersionInput) (HardwareVersion, error)
 	ListCWMPParameters(context.Context, string, string) ([]CWMPParameter, error)
 	ReplaceCWMPParameters(context.Context, string, string, []CWMPParameterInput) ([]CWMPParameter, error)
@@ -51,6 +55,11 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/acs/router-models", manage(http.HandlerFunc(h.createModel)))
 	mux.Handle("PUT /api/v1/acs/router-models/{id}", manage(http.HandlerFunc(h.updateModel)))
 	mux.Handle("DELETE /api/v1/acs/router-models/{id}", manage(http.HandlerFunc(h.deleteModel)))
+	mux.Handle("GET /api/v1/acs/tr069-data-models", read(http.HandlerFunc(h.listTR069DataModels)))
+	mux.Handle("GET /api/v1/acs/tr069-data-models/{id}", read(http.HandlerFunc(h.getTR069DataModel)))
+	mux.Handle("POST /api/v1/acs/tr069-data-models", manage(http.HandlerFunc(h.createTR069DataModel)))
+	mux.Handle("PUT /api/v1/acs/tr069-data-models/{id}", manage(http.HandlerFunc(h.updateTR069DataModel)))
+	mux.Handle("DELETE /api/v1/acs/tr069-data-models/{id}", manage(http.HandlerFunc(h.deleteTR069DataModel)))
 	mux.Handle("POST /api/v1/acs/router-models/{id}/hardware-versions", manage(http.HandlerFunc(h.createHardware)))
 	mux.Handle("PUT /api/v1/acs/router-models/{id}/hardware-versions/{version_id}", manage(http.HandlerFunc(h.updateHardware)))
 	mux.Handle("GET /api/v1/acs/router-models/{id}/cwmp-parameters", read(http.HandlerFunc(h.listCWMPParameters)))
@@ -189,12 +198,20 @@ func (h *Handler) saveModel(w http.ResponseWriter, r *http.Request, id string) {
 	}
 	input.Name = strings.TrimSpace(input.Name)
 	input.ManufacturerID = strings.TrimSpace(input.ManufacturerID)
+	if input.TR069DataModelID != nil {
+		value := strings.TrimSpace(*input.TR069DataModelID)
+		input.TR069DataModelID = &value
+	}
 	input.Protocol = strings.ToUpper(strings.TrimSpace(input.Protocol))
 	if input.Protocol == "" {
 		input.Protocol = "TR-069"
 	}
 	if input.Name == "" || len(input.Name) > 200 || !uuidPattern.MatchString(input.ManufacturerID) {
 		validation(w, r, "Name and a valid manufacturer_id are required")
+		return
+	}
+	if input.TR069DataModelID == nil || !uuidPattern.MatchString(*input.TR069DataModelID) {
+		validation(w, r, "A valid tr069_data_model_id is required")
 		return
 	}
 	if input.Protocol != "TR-069" {
@@ -233,6 +250,87 @@ func (h *Handler) saveModel(w http.ResponseWriter, r *http.Request, id string) {
 		status = http.StatusCreated
 	}
 	httpserver.WriteJSON(w, status, map[string]any{"data": item})
+}
+
+func (h *Handler) listTR069DataModels(w http.ResponseWriter, r *http.Request) {
+	p, _ := auth.PrincipalFromContext(r.Context())
+	items, err := h.store.ListTR069DataModels(r.Context(), p.TenantID)
+	if writeCatalogError(w, r, err) {
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"data": items})
+}
+
+func (h *Handler) getTR069DataModel(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validID(w, r, id) {
+		return
+	}
+	p, _ := auth.PrincipalFromContext(r.Context())
+	item, err := h.store.GetTR069DataModel(r.Context(), p.TenantID, id)
+	if writeCatalogError(w, r, err) {
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"data": item})
+}
+
+func (h *Handler) createTR069DataModel(w http.ResponseWriter, r *http.Request) {
+	h.saveTR069DataModel(w, r, "")
+}
+
+func (h *Handler) updateTR069DataModel(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validID(w, r, id) {
+		return
+	}
+	h.saveTR069DataModel(w, r, id)
+}
+
+func (h *Handler) saveTR069DataModel(w http.ResponseWriter, r *http.Request, id string) {
+	var input TR069DataModelInput
+	if !decode(w, r, &input) {
+		return
+	}
+	input.Name = strings.TrimSpace(input.Name)
+	if input.Name == "" || len(input.Name) > 100 {
+		validation(w, r, "Name is required and must contain at most 100 characters")
+		return
+	}
+	validTypes := map[string]bool{"string": true, "boolean": true, "int": true, "unsignedInt": true, "dateTime": true, "base64": true, "hexBinary": true}
+	seen := make(map[string]bool, len(input.Commands))
+	for index := range input.Commands {
+		command := &input.Commands[index]
+		command.ParameterPath = strings.TrimSpace(command.ParameterPath)
+		command.ValueType = strings.TrimSpace(command.ValueType)
+		key := strings.ToLower(command.ParameterPath)
+		if command.ParameterPath == "" || len(command.ParameterPath) > 500 || !validTypes[command.ValueType] || seen[key] {
+			validation(w, r, "Commands require a unique parameter_path and a valid value_type")
+			return
+		}
+		seen[key] = true
+	}
+	p, _ := auth.PrincipalFromContext(r.Context())
+	item, err := h.store.SaveTR069DataModel(r.Context(), p.TenantID, id, input)
+	if writeCatalogError(w, r, err) {
+		return
+	}
+	status := http.StatusOK
+	if id == "" {
+		status = http.StatusCreated
+	}
+	httpserver.WriteJSON(w, status, map[string]any{"data": item})
+}
+
+func (h *Handler) deleteTR069DataModel(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validID(w, r, id) {
+		return
+	}
+	p, _ := auth.PrincipalFromContext(r.Context())
+	if writeCatalogError(w, r, h.store.DeleteTR069DataModel(r.Context(), p.TenantID, id)) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 func (h *Handler) deleteModel(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")

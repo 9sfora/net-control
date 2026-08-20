@@ -57,7 +57,7 @@ func (r *Repository) Get(ctx context.Context, tenantID, commandID string) (Detai
 			SELECT c.id,c.router_id,r.name,c.type,c.status,c.priority,c.attempts_count,c.max_attempts,
 			       c.idempotency_key,c.available_at,c.next_attempt_at,c.expires_at,c.completed_at,
 			       c.error_code,c.error_message,c.result,c.created_at,c.updated_at,
-			       jsonb_build_object('configuration_version',c.parameters->'configuration_version')
+			       c.parameters
 			FROM acs.router_commands c JOIN acs.routers r ON r.id=c.router_id
 			WHERE c.tenant_id=$1 AND c.id=$2`, tenantID, commandID).Scan(&detail.ID, &detail.RouterID, &detail.RouterName,
 			&detail.Type, &detail.Status, &detail.Priority, &detail.AttemptsCount, &detail.MaxAttempts, &detail.IdempotencyKey,

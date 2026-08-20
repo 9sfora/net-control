@@ -88,7 +88,7 @@ func (d *Dispatcher) Next(ctx context.Context, sessionID string) (OutboundComman
 		} else if err != nil {
 			return fmt.Errorf("claim command: %w", err)
 		}
-		if outbound.Type != "ACTIVATE" && outbound.Type != "UPDATE_FIRMWARE" {
+		if outbound.Type != "ACTIVATE" && outbound.Type != "UPDATE_FIRMWARE" && outbound.Type != "SYNC" {
 			return fmt.Errorf("unsupported command type %s", outbound.Type)
 		}
 		if err := tx.QueryRow(ctx, `
@@ -96,7 +96,15 @@ func (d *Dispatcher) Next(ctx context.Context, sessionID string) (OutboundComman
 			VALUES ($1,$2,$3,$4,$5) RETURNING id`, tenantID, outbound.ID, sessionID, attemptNumber, raw).Scan(&outbound.AttemptID); err != nil {
 			return fmt.Errorf("create command attempt: %w", err)
 		}
-		if outbound.Type == "ACTIVATE" {
+		if outbound.Type == "SYNC" {
+			var parameters struct {
+				Parameters []ParameterValue `json:"parameters"`
+			}
+			if err := json.Unmarshal(raw, &parameters); err != nil {
+				return fmt.Errorf("decode sync parameters: %w", err)
+			}
+			outbound.Parameters = parameters.Parameters
+		} else if outbound.Type == "ACTIVATE" {
 			var parameters commandParameters
 			if err := json.Unmarshal(raw, &parameters); err != nil {
 				return fmt.Errorf("decode command parameters: %w", err)
@@ -148,24 +156,41 @@ func (d *Dispatcher) Complete(ctx context.Context, sessionID string, result Comm
 			return d.completeTransfer(ctx, tx, tenantID, sessionID, result)
 		}
 		var attemptID, commandID, routerID, commandType string
+		var rawCommandParameters []byte
 		if err := tx.QueryRow(ctx, `
-			SELECT a.id, a.router_command_id, c.router_id, c.type
+			SELECT a.id, a.router_command_id, c.router_id, c.type, c.parameters
 			FROM acs.router_command_attempts a JOIN acs.router_commands c ON c.id=a.router_command_id
 			WHERE a.tenant_id=$1 AND a.session_id=$2 AND a.status='PROCESSING'
-			ORDER BY a.started_at DESC LIMIT 1 FOR UPDATE OF a,c`, tenantID, sessionID).Scan(&attemptID, &commandID, &routerID, &commandType); errors.Is(err, pgx.ErrNoRows) {
+			ORDER BY a.started_at DESC LIMIT 1 FOR UPDATE OF a,c`, tenantID, sessionID).Scan(&attemptID, &commandID, &routerID, &commandType, &rawCommandParameters); errors.Is(err, pgx.ErrNoRows) {
 			return ErrNoCommand
 		} else if err != nil {
 			return fmt.Errorf("find active attempt: %w", err)
 		}
 		response, _ := json.Marshal(map[string]string{"xml": result.Raw})
 		if result.Fault {
-			if _, err := tx.Exec(ctx, `UPDATE acs.router_command_attempts SET status='FAILED',response_payload=$2,error_code=$3,error_message=$4,finished_at=now(),duration_ms=round(EXTRACT(EPOCH FROM(now()-started_at))*1000)::int WHERE id=$1`, attemptID, response, result.FaultCode, result.FaultString); err != nil {
+			requestedParameters := make([]string, 0)
+			if commandType == "SYNC" {
+				var syncParameters struct {
+					Parameters []ParameterValue `json:"parameters"`
+				}
+				if json.Unmarshal(rawCommandParameters, &syncParameters) == nil {
+					for _, parameter := range syncParameters.Parameters {
+						requestedParameters = append(requestedParameters, parameter.Name)
+					}
+				}
+			}
+			detailedMessage := fmt.Sprintf("CWMP %s: %s", result.FaultCode, result.FaultString)
+			if commandType == "SYNC" {
+				detailedMessage = fmt.Sprintf("%s (SYNC GetParameterValues; requested=%s)", detailedMessage, strings.Join(requestedParameters, ","))
+			}
+			failureResult, _ := json.Marshal(map[string]any{"command_type": commandType, "fault_code": result.FaultCode, "fault_string": result.FaultString, "requested_parameters": requestedParameters, "response_xml": result.Raw})
+			if _, err := tx.Exec(ctx, `UPDATE acs.router_command_attempts SET status='FAILED',response_payload=$2,error_code=$3,error_message=$4,finished_at=now(),duration_ms=round(EXTRACT(EPOCH FROM(now()-started_at))*1000)::int WHERE id=$1`, attemptID, response, result.FaultCode, detailedMessage); err != nil {
 				return err
 			}
-			if _, err := tx.Exec(ctx, `UPDATE acs.router_commands SET status='FAILED',error_code=$2,error_message=$3,completed_at=now() WHERE id=$1`, commandID, result.FaultCode, result.FaultString); err != nil {
+			if _, err := tx.Exec(ctx, `UPDATE acs.router_commands SET status='FAILED',error_code=$2,error_message=$3,result=$4,completed_at=now() WHERE id=$1`, commandID, result.FaultCode, detailedMessage, failureResult); err != nil {
 				return err
 			}
-			_, err := tx.Exec(ctx, `INSERT INTO acs.router_command_events (tenant_id,router_command_id,from_status,to_status,reason) VALUES ($1,$2,'PROCESSING','FAILED',$3)`, tenantID, commandID, result.FaultString)
+			_, err := tx.Exec(ctx, `INSERT INTO acs.router_command_events (tenant_id,router_command_id,from_status,to_status,reason,metadata) VALUES ($1,$2,'PROCESSING','FAILED',$3,$4)`, tenantID, commandID, detailedMessage, failureResult)
 			return err
 		}
 		if result.Kind == "DOWNLOAD_ACCEPTED" {
@@ -194,7 +219,15 @@ func (d *Dispatcher) Complete(ctx context.Context, sessionID string, result Comm
 		if _, err := tx.Exec(ctx, `UPDATE acs.router_command_attempts SET status='COMPLETED',response_payload=$2,finished_at=now(),duration_ms=round(EXTRACT(EPOCH FROM(now()-started_at))*1000)::int WHERE id=$1`, attemptID, response); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `UPDATE acs.router_commands SET status='COMPLETED',completed_at=now(),result='{"applied":true}'::jsonb WHERE id=$1`, commandID); err != nil {
+		commandResult := map[string]any{"applied": true}
+		if commandType == "SYNC" {
+			commandResult = map[string]any{"parameters": result.Parameters}
+		}
+		encodedResult, err := json.Marshal(commandResult)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE acs.router_commands SET status='COMPLETED',completed_at=now(),result=$2 WHERE id=$1`, commandID, encodedResult); err != nil {
 			return err
 		}
 		if commandType == "ACTIVATE" {
@@ -202,10 +235,14 @@ func (d *Dispatcher) Complete(ctx context.Context, sessionID string, result Comm
 				return err
 			}
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO acs.router_command_events (tenant_id,router_command_id,from_status,to_status,reason) VALUES ($1,$2,'PROCESSING','COMPLETED','CPE acknowledged SetParameterValues')`, tenantID, commandID); err != nil {
+		reason := "CPE acknowledged SetParameterValues"
+		if commandType == "SYNC" {
+			reason = "CPE returned GetParameterValues"
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO acs.router_command_events (tenant_id,router_command_id,from_status,to_status,reason) VALUES ($1,$2,'PROCESSING','COMPLETED',$3)`, tenantID, commandID, reason); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `UPDATE acs.router_sessions SET status='COMPLETED',finished_at=now() WHERE id=$1`, sessionID)
+		_, err = tx.Exec(ctx, `UPDATE acs.router_sessions SET status='COMPLETED',finished_at=now() WHERE id=$1`, sessionID)
 		return err
 	})
 }

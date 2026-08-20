@@ -15,6 +15,8 @@ import (
 type OperationsStore interface {
 	ListRouters(context.Context, string, ListFilter) ([]Summary, error)
 	GetRouter(context.Context, string, string) (Detail, error)
+	DeleteRouter(context.Context, string, string) error
+	BlockRouter(context.Context, string, string, string) error
 }
 
 type OperationsHandler struct {
@@ -31,6 +33,42 @@ func NewOperationsHandler(store OperationsStore, tokens *auth.TokenManager, onli
 func (h *OperationsHandler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/acs/routers", auth.Authenticate(h.tokens, auth.RequirePermission("acs.router.read", http.HandlerFunc(h.list))))
 	mux.Handle("GET /api/v1/acs/routers/{id}", auth.Authenticate(h.tokens, auth.RequirePermission("acs.router.read", http.HandlerFunc(h.get))))
+	mux.Handle("DELETE /api/v1/acs/routers/{id}", auth.Authenticate(h.tokens, auth.RequirePermission("acs.router.delete", http.HandlerFunc(h.delete))))
+	mux.Handle("POST /api/v1/acs/routers/{id}/block", auth.Authenticate(h.tokens, auth.RequirePermission("acs.router.command.block", http.HandlerFunc(h.block))))
+}
+
+func (h *OperationsHandler) block(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !uuidPattern.MatchString(id) {
+		httpserver.WriteError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid router ID")
+		return
+	}
+	principal, _ := auth.PrincipalFromContext(r.Context())
+	if err := h.store.BlockRouter(r.Context(), principal.TenantID, id, principal.UserID); errors.Is(err, ErrNotFound) {
+		httpserver.WriteError(w, r, http.StatusNotFound, "ACS_ROUTER_NOT_FOUND", "Router not found")
+		return
+	} else if err != nil {
+		httpserver.WriteError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "Internal server error")
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
+}
+
+func (h *OperationsHandler) delete(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !uuidPattern.MatchString(id) {
+		httpserver.WriteError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid router ID")
+		return
+	}
+	principal, _ := auth.PrincipalFromContext(r.Context())
+	if err := h.store.DeleteRouter(r.Context(), principal.TenantID, id); errors.Is(err, ErrNotFound) {
+		httpserver.WriteError(w, r, http.StatusNotFound, "ACS_ROUTER_NOT_FOUND", "Router not found")
+		return
+	} else if err != nil {
+		httpserver.WriteError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "Internal server error")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *OperationsHandler) list(w http.ResponseWriter, r *http.Request) {

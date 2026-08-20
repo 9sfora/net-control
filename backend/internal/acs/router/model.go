@@ -69,10 +69,12 @@ type RecentCommand struct {
 
 type Detail struct {
 	Summary
-	WiFi     []WiFiView            `json:"wifi"`
-	Network  *NetworkConfiguration `json:"network"`
-	Sessions []Session             `json:"sessions"`
-	Commands []RecentCommand       `json:"commands"`
+	InformCount       int64                 `json:"inform_count"`
+	FirmwareUpdatedAt *time.Time            `json:"firmware_updated_at"`
+	WiFi              []WiFiView            `json:"wifi"`
+	Network           *NetworkConfiguration `json:"network"`
+	Sessions          []Session             `json:"sessions"`
+	Commands          []RecentCommand       `json:"commands"`
 }
 
 type WiFiView struct {

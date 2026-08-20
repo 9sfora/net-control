@@ -1,6 +1,7 @@
 import { FormEvent, ReactNode, useCallback, useEffect, useState } from "react";
 import {
   Activity,
+  ArrowLeft,
   Boxes,
   ChevronRight,
   CircleArrowUp,
@@ -13,9 +14,11 @@ import {
   PackageOpen,
   Plus,
   RefreshCw,
+  RotateCcw,
   Router,
   Search,
   Star,
+  ShieldBan,
   Trash2,
   Upload,
   Wifi,
@@ -28,6 +31,7 @@ import {
   Routes,
   useLocation,
   useNavigate,
+  useParams,
 } from "react-router-dom";
 import {
   api,
@@ -83,6 +87,22 @@ type RouterItem = {
   last_seen_at?: string;
   last_ip_address?: string;
   software_version?: string;
+};
+type RouterDetailData = RouterItem & {
+  oui: string;
+  product_class: string;
+  hardware_version?: string;
+  catalog_hardware_version?: string;
+  reported_status: string;
+  first_seen_at?: string;
+  last_inform_at?: string;
+  created_at: string;
+  updated_at: string;
+  inform_count: number;
+  firmware_updated_at?: string;
+  wifi: { band: string; ssid: string; password_configured: boolean; security_mode: string; channel?: number; channel_mode: string; bandwidth_mhz?: number; enabled: boolean }[];
+  sessions: { id: string; ip_address?: string; started_at: string; status: string }[];
+  commands: { id: string; type: string; status: string; attempts_count: number; created_at: string; completed_at?: string }[];
 };
 type UnknownRouter = {
   id: string;
@@ -396,7 +416,8 @@ function Shell({ user, onLogout }: { user: Principal; onLogout: () => void }) {
         <Routes>
           <Route path="/" element={<Navigate to={first} replace />} />
           <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/routers" element={<Routers />} />
+          <Route path="/routers" element={<Routers canDelete={user.permissions.includes("acs.router.delete")} canBlock={user.permissions.includes("acs.router.command.block")} />} />
+          <Route path="/routers/:id" element={<RouterDetail />} />
           <Route
             path="/discovery"
             element={
@@ -673,7 +694,8 @@ function EmptyInline() {
   return <div className="empty-inline">Nenhuma atividade recente.</div>;
 }
 
-function Routers() {
+function Routers({ canDelete, canBlock }: { canDelete: boolean; canBlock: boolean }) {
+  const navigate = useNavigate();
   const [search, setSearch] = useState(""),
     [status, setStatus] = useState("");
   const query = new URLSearchParams({ limit: "100" });
@@ -683,6 +705,8 @@ function Routers() {
     `/api/v1/acs/routers?${query}`,
   );
   const rows = state.data?.data || [];
+  async function remove(router: RouterItem) { if (!confirm(`Excluir o roteador “${router.name}” e todo o seu histórico?`)) return; try { await api(`/api/v1/acs/routers/${router.id}`, { method: "DELETE" }); state.reload() } catch (e) { alert(e instanceof Error ? e.message : "Erro ao excluir") } }
+  async function block(router: RouterItem) { if (!confirm(`Bloquear o roteador “${router.name}”?`)) return; try { await api(`/api/v1/acs/routers/${router.id}/block`, { method: "POST" }); state.reload() } catch (e) { alert(e instanceof Error ? e.message : "Erro ao bloquear") } }
   return (
     <Page
       title="Roteadores"
@@ -707,10 +731,11 @@ function Routers() {
             "Endereço IP",
             "Última conexão",
             "Status",
+            "Ações",
           ]}
         >
           {rows.map((r) => (
-            <tr key={r.id}>
+            <tr className="clickable-row" key={r.id} onClick={() => navigate(`/routers/${r.id}`)}>
               <td>
                 <strong>{r.name}</strong>
                 <small>{r.manufacturer}</small>
@@ -722,6 +747,7 @@ function Routers() {
               <td>
                 <Badge value={r.connectivity_status} />
               </td>
+              <td><div className="row-actions" onClick={(e) => e.stopPropagation()}>{canBlock && r.desired_status !== "BLOCKED" && <button title="Bloquear" onClick={() => block(r)}><ShieldBan /></button>}{canDelete && <button className="danger" title="Excluir" onClick={() => remove(r)}><Trash2 /></button>}</div></td>
             </tr>
           ))}
         </Table>
@@ -729,6 +755,23 @@ function Routers() {
     </Page>
   );
 }
+function RouterDetail() {
+  const { id } = useParams(), navigate = useNavigate();
+  const state = useData<Envelope<RouterDetailData>>(`/api/v1/acs/routers/${id}`), router = state.data?.data;
+  async function activate() { try { await api(`/api/v1/acs/routers/${id}/commands`, { method: "POST", body: JSON.stringify({ type: "ACTIVATE" }) }); alert("Comando de ativação adicionado à fila."); state.reload() } catch (e) { alert(e instanceof Error ? e.message : "Erro ao gerar comando") } }
+  async function block() { if (!confirm("Bloquear este roteador?")) return; try { await api(`/api/v1/acs/routers/${id}/block`, { method: "POST" }); state.reload() } catch (e) { alert(e instanceof Error ? e.message : "Erro ao bloquear") } }
+  const pendingCommand = () => alert("Este comando será conectado ao dispatcher na próxima etapa.");
+  return <Page title={router?.name || "Roteador"} description="Informações, redes e operação do equipamento." action={<div className="page-actions"><button className="button" onClick={() => navigate("/routers")}><ArrowLeft size={16} /> Voltar</button><button className="button" onClick={state.reload}><RefreshCw size={16} /> Atualizar</button></div>}>
+    <State {...state} reload={state.reload} />{router && <>
+      <div className="router-actions"><button className="button" onClick={pendingCommand}><RotateCcw size={16} /> Reiniciar</button><button className="button" onClick={pendingCommand}>Redefinir de fábrica</button><button className="button primary" onClick={activate}><CircleArrowUp size={16} /> Ativar</button><button className="button" onClick={pendingCommand}><Upload size={16} /> Atualizar firmware</button><button className="button danger-button" onClick={block}><ShieldBan size={16} /> Bloquear</button><a className="button" href="#router-commands"><Command size={16} /> Listar comandos</a></div>
+      <section className="detail-section"><h2>Geral</h2><div className="info-grid">
+        <Info label="Endereço IPv4" value={router.last_ip_address} mono /><Info label="Endereço IPv6" /><Info label="Status" value={label[router.connectivity_status] || router.connectivity_status} /><Info label="OUI" value={router.oui} mono /><Info label="Nome" value={router.name} /><Info label="UPNP" /><Info label="Modelo" value={[router.router_model_name, router.catalog_hardware_version].filter(Boolean).join(" + ")} /><Info label="Número de série" value={router.serial_number} mono /><Info label="MAC" /><Info label="Classe do produto" value={router.product_class} /><Info label="Firmware" /><Info label="Versão do software" value={router.software_version} /><Info label="Versão do hardware" value={router.catalog_hardware_version || router.hardware_version} /><Info label="Informes recebidos" value={String(router.inform_count)} /><Info label="Último informe" value={formatDate(router.last_inform_at)} /><Info label="Criado em" value={formatDate(router.created_at)} /><Info label="Atualizado em" value={formatDate(router.updated_at)} /><Info label="Firmware atualizado em" value={formatDate(router.firmware_updated_at)} />
+      </div></section>
+      {["2.4GHZ", "5GHZ"].map(band => { const wifi = router.wifi.find(item => item.band === band); return <section className="detail-section" key={band}><h2>Rede {band === "2.4GHZ" ? "2.4 GHz" : "5.8 GHz"}</h2><div className="info-grid"><Info label="SSID" value={wifi?.ssid} /><Info label="Limite mínimo de RSSI (dB)" /><Info label="Modo" value={wifi?.channel_mode} /><Info label="Segurança" value={wifi?.security_mode} /><Info label="Senha" value={wifi?.password_configured ? "••••••••" : "Não configurada"} /><Info label="Modo de autenticação" value={wifi?.security_mode} /><Info label="Canal" value={wifi?.channel?.toString() || (wifi ? "Automático" : undefined)} /><Info label="Largura de banda" value={wifi?.bandwidth_mhz ? `${wifi.bandwidth_mhz} MHz` : undefined} /><Info label="Potência" /><Info label="Ativo" value={wifi ? (wifi.enabled ? "Ativo" : "Desativado") : undefined} /><Info label="Visível" /><Info label="Isolar clientes" /><Info label="ATF" /></div></section> })}
+      <section className="detail-section" id="router-commands"><h2>Comandos recentes</h2>{router.commands.length ? <Table headers={["Comando", "Status", "Tentativas", "Criado em", "Concluído em"]}>{router.commands.map(item => <tr key={item.id}><td>{label[item.type] || item.type}</td><td><Badge value={item.status} /></td><td>{item.attempts_count}</td><td>{formatDate(item.created_at)}</td><td>{formatDate(item.completed_at)}</td></tr>)}</Table> : <EmptyInline />}</section>
+    </>}</Page>
+}
+function Info({ label: title, value, mono = false }: { label: string; value?: string | null; mono?: boolean }) { return <div className="info-item"><span>{title}</span><strong className={mono ? "mono" : ""}>{value || "Não informado"}</strong></div> }
 function Discovery({
   canManageCatalog,
   canPromote,

@@ -81,6 +81,12 @@ func (r *Repository) GetRouter(ctx context.Context, tenantID, routerID string) (
 			return err
 		}
 		wifiRows.Close()
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM acs.router_sessions WHERE tenant_id=$1 AND router_id=$2`, tenantID, routerID).Scan(&detail.InformCount); err != nil {
+			return fmt.Errorf("count router informs: %w", err)
+		}
+		if err := tx.QueryRow(ctx, `SELECT max(completed_at) FROM acs.router_commands WHERE tenant_id=$1 AND router_id=$2 AND type='UPDATE_FIRMWARE' AND status='COMPLETED'`, tenantID, routerID).Scan(&detail.FirmwareUpdatedAt); err != nil {
+			return fmt.Errorf("get firmware update time: %w", err)
+		}
 
 		var network NetworkConfiguration
 		err = tx.QueryRow(ctx, `SELECT dhcp_enabled,host(dhcp_start),host(dhcp_end),host(dhcp_gateway),host(dhcp_subnet_mask),dhcp_lease_seconds,host(dns_primary),host(dns_secondary) FROM acs.router_network_settings WHERE tenant_id=$1 AND router_id=$2`, tenantID, routerID).Scan(&network.DHCPEnabled, &network.DHCPStart, &network.DHCPEnd, &network.DHCPGateway, &network.DHCPSubnetMask, &network.DHCPLeaseSeconds, &network.DNSPrimary, &network.DNSSecondary)
@@ -123,6 +129,39 @@ func (r *Repository) GetRouter(ctx context.Context, tenantID, routerID string) (
 		return commandRows.Err()
 	})
 	return detail, err
+}
+
+func (r *Repository) DeleteRouter(ctx context.Context, tenantID, routerID string) error {
+	return database.InTenantTransaction(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `DELETE FROM acs.router_commands WHERE tenant_id=$1 AND router_id=$2`, tenantID, routerID); err != nil {
+			return fmt.Errorf("delete router commands: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM acs.router_sessions WHERE tenant_id=$1 AND router_id=$2`, tenantID, routerID); err != nil {
+			return fmt.Errorf("delete router sessions: %w", err)
+		}
+		result, err := tx.Exec(ctx, `DELETE FROM acs.routers WHERE tenant_id=$1 AND id=$2`, tenantID, routerID)
+		if err != nil {
+			return fmt.Errorf("delete router: %w", err)
+		}
+		if result.RowsAffected() == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
+}
+
+func (r *Repository) BlockRouter(ctx context.Context, tenantID, routerID, userID string) error {
+	return database.InTenantTransaction(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		result, err := tx.Exec(ctx, `UPDATE acs.routers SET desired_status='BLOCKED' WHERE tenant_id=$1 AND id=$2`, tenantID, routerID)
+		if err != nil {
+			return fmt.Errorf("block router: %w", err)
+		}
+		if result.RowsAffected() == 0 {
+			return ErrNotFound
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO acs.router_commands(tenant_id,router_id,created_by,type,priority) VALUES($1,$2,$3,'BLOCK','CRITICAL')`, tenantID, routerID, userID)
+		return err
+	})
 }
 
 func scanSummary(row scanner, item *Summary) error {

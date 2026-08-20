@@ -68,6 +68,7 @@ func (h *Handler) configure(w http.ResponseWriter, r *http.Request) {
 		Name              string  `json:"name"`
 		RouterModelID     string  `json:"router_model_id"`
 		HardwareVersionID *string `json:"hardware_version_id"`
+		HardwareVersion   *string `json:"hardware_version"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	decoder.DisallowUnknownFields()
@@ -76,12 +77,24 @@ func (h *Handler) configure(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	input.RouterModelID = strings.TrimSpace(input.RouterModelID)
+	if input.HardwareVersion != nil {
+		value := strings.TrimSpace(*input.HardwareVersion)
+		if len(value) > 100 {
+			httpserver.WriteError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "Hardware version must contain at most 100 characters")
+			return
+		}
+		if value == "" {
+			input.HardwareVersion = nil
+		} else {
+			input.HardwareVersion = &value
+		}
+	}
 	if !uuidPattern.MatchString(input.RouterModelID) || (input.HardwareVersionID != nil && !uuidPattern.MatchString(*input.HardwareVersionID)) {
 		httpserver.WriteError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "Valid router_model_id and hardware_version_id are required")
 		return
 	}
 	principal, _ := auth.PrincipalFromContext(r.Context())
-	configured, err := h.store.Configure(r.Context(), principal.TenantID, unknownID, ConfigureUnknownInput{Name: strings.TrimSpace(input.Name), RouterModelID: input.RouterModelID, HardwareVersionID: input.HardwareVersionID})
+	configured, err := h.store.Configure(r.Context(), principal.TenantID, unknownID, ConfigureUnknownInput{Name: strings.TrimSpace(input.Name), RouterModelID: input.RouterModelID, HardwareVersionID: input.HardwareVersionID, HardwareVersion: input.HardwareVersion})
 	if errors.Is(err, ErrNotFound) {
 		httpserver.WriteError(w, r, http.StatusNotFound, "ACS_UNKNOWN_ROUTER_NOT_FOUND", "Unknown router not found")
 		return

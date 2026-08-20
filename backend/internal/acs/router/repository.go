@@ -149,6 +149,10 @@ func (r *Repository) Configure(ctx context.Context, tenantID, unknownID string, 
 				return ErrIncompatibleHardware
 			}
 		}
+		hardwareVersion := unknown.HardwareVersion
+		if input.HardwareVersion != nil {
+			hardwareVersion = input.HardwareVersion
+		}
 
 		err = tx.QueryRow(ctx, `
 			INSERT INTO acs.routers
@@ -158,7 +162,7 @@ func (r *Repository) Configure(ctx context.Context, tenantID, unknownID string, 
 			RETURNING id, name, manufacturer, oui, product_class, serial_number, software_version,
 			          hardware_version,router_model_id,hardware_version_id,desired_status, reported_status, first_seen_at, last_seen_at, created_at`,
 			tenantID, input.Name, unknown.Manufacturer, unknown.OUI, unknown.ProductClass, unknown.SerialNumber,
-			unknown.SoftwareVersion, unknown.HardwareVersion, unknown.FirstSeenAt, unknown.LastSeenAt,
+			unknown.SoftwareVersion, hardwareVersion, unknown.FirstSeenAt, unknown.LastSeenAt,
 			unknown.LastIPAddress, input.RouterModelID, input.HardwareVersionID).Scan(&configured.ID, &configured.Name, &configured.Manufacturer,
 			&configured.OUI, &configured.ProductClass, &configured.SerialNumber, &configured.SoftwareVersion,
 			&configured.HardwareVersion, &configured.RouterModelID, &configured.HardwareVersionID, &configured.DesiredStatus, &configured.ReportedStatus,

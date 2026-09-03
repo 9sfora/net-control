@@ -31,8 +31,9 @@ type ActivationOverrides struct {
 }
 
 type DesiredConfiguration struct {
-	WiFi    []WiFiConfiguration   `json:"wifi"`
-	Network *NetworkConfiguration `json:"network"`
+	WiFi                []WiFiConfiguration   `json:"wifi"`
+	Network             *NetworkConfiguration `json:"network"`
+	BandSteeringEnabled *bool                 `json:"band_steering_enabled"`
 }
 
 type ConfigurationResult struct {

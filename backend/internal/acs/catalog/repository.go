@@ -396,9 +396,10 @@ SELECT $1,$2,p.parameter_key,p.parameter_name,p.xsd_type FROM (VALUES
 ('wifi.5.security_mode','Device.WiFi.AccessPoint.2.Security.ModeEnabled','string'),('wifi.5.password','Device.WiFi.AccessPoint.2.Security.KeyPassphrase','string'),
 ('wifi.5.channel','Device.WiFi.Radio.2.Channel','unsignedInt'),('wifi.5.bandwidth','Device.WiFi.Radio.2.OperatingChannelBandwidth','string'),
 ('dhcp.enabled','Device.DHCPv4.Server.Pool.1.Enable','boolean'),('dhcp.start','Device.DHCPv4.Server.Pool.1.MinAddress','string'),
-('dhcp.end','Device.DHCPv4.Server.Pool.1.MaxAddress','string'),('dhcp.gateway','Device.DHCPv4.Server.Pool.1.IPRouters','string'),
+('dhcp.end','Device.DHCPv4.Server.Pool.1.MaxAddress','string'),('dhcp.gateway','Device.IP.Interface.1.IPv4Address.1.IPAddress','string'),
 ('dhcp.subnet_mask','Device.DHCPv4.Server.Pool.1.SubnetMask','string'),('dhcp.lease_seconds','Device.DHCPv4.Server.Pool.1.LeaseTime','int'),
-('dns.servers','Device.DHCPv4.Server.Pool.1.DNSServers','string')) AS p(parameter_key,parameter_name,xsd_type)`
+('dns.servers','Device.DHCPv4.Server.Pool.1.DNSServers','string'),
+('wifi.band_steering','Device.WiFi.X_TP_BandSteering.Enable','boolean')) AS p(parameter_key,parameter_name,xsd_type)`
 
 func catalogError(err error) error {
 	if errors.Is(err, pgx.ErrNoRows) {

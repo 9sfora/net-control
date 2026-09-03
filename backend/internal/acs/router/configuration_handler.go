@@ -211,7 +211,7 @@ func hasPermission(permissions []string, expected string) bool {
 }
 
 func validateConfiguration(configuration *DesiredConfiguration) string {
-	if len(configuration.WiFi) > 2 || (len(configuration.WiFi) == 0 && configuration.Network == nil) {
+	if len(configuration.WiFi) > 2 || (len(configuration.WiFi) == 0 && configuration.Network == nil && configuration.BandSteeringEnabled == nil) {
 		return "One or two Wi-Fi radios or a network configuration are required"
 	}
 	bands := make(map[string]bool)

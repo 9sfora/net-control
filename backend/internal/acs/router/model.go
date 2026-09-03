@@ -80,6 +80,7 @@ type Detail struct {
 	Commands            []RecentCommand       `json:"commands"`
 	CollectedParameters json.RawMessage       `json:"collected_parameters"`
 	LastSyncAt          *time.Time            `json:"last_sync_at"`
+	BandSteeringEnabled *bool                 `json:"band_steering_enabled"`
 }
 
 type WiFiView struct {

@@ -63,7 +63,7 @@ func (r *Repository) GetRouter(ctx context.Context, tenantID, routerID string) (
 		} else if err != nil {
 			return fmt.Errorf("get router: %w", err)
 		}
-		if err := tx.QueryRow(ctx, `SELECT collected_parameters,last_sync_at FROM acs.routers WHERE tenant_id=$1 AND id=$2`, tenantID, routerID).Scan(&detail.CollectedParameters, &detail.LastSyncAt); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT collected_parameters,last_sync_at,band_steering_enabled FROM acs.routers WHERE tenant_id=$1 AND id=$2`, tenantID, routerID).Scan(&detail.CollectedParameters, &detail.LastSyncAt, &detail.BandSteeringEnabled); err != nil {
 			return fmt.Errorf("get collected router parameters: %w", err)
 		}
 

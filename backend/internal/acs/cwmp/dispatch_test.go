@@ -22,6 +22,16 @@ func TestMapActivationScopes(t *testing.T) {
 		Enabled           bool   `json:"enabled"`
 	}{Band: "2.4GHZ", SSID: "Scoped", EncryptedPassword: base64.StdEncoding.EncodeToString([]byte("encrypted"))})
 	start, end, gateway, mask, dns := "192.168.4.100", "192.168.4.200", "192.168.4.1", "255.255.255.0", "8.8.8.8"
+	snapshot.Network = &struct {
+		DHCPEnabled      bool    `json:"dhcp_enabled"`
+		DHCPStart        *string `json:"dhcp_start"`
+		DHCPEnd          *string `json:"dhcp_end"`
+		DHCPGateway      *string `json:"dhcp_gateway"`
+		DHCPSubnetMask   *string `json:"dhcp_subnet_mask"`
+		DHCPLeaseSeconds *int    `json:"dhcp_lease_seconds"`
+		DNSPrimary       *string `json:"dns_primary"`
+		DNSSecondary     *string `json:"dns_secondary"`
+	}{}
 	snapshot.Network.DHCPStart = &start
 	snapshot.Network.DHCPEnd = &end
 	snapshot.Network.DHCPGateway = &gateway
@@ -59,6 +69,16 @@ func TestMapActivationScopes(t *testing.T) {
 
 func TestMapActivationUsesModelMappings(t *testing.T) {
 	var snapshot activationSnapshot
+	snapshot.Network = &struct {
+		DHCPEnabled      bool    `json:"dhcp_enabled"`
+		DHCPStart        *string `json:"dhcp_start"`
+		DHCPEnd          *string `json:"dhcp_end"`
+		DHCPGateway      *string `json:"dhcp_gateway"`
+		DHCPSubnetMask   *string `json:"dhcp_subnet_mask"`
+		DHCPLeaseSeconds *int    `json:"dhcp_lease_seconds"`
+		DNSPrimary       *string `json:"dns_primary"`
+		DNSSecondary     *string `json:"dns_secondary"`
+	}{}
 	start, end := "192.168.4.100", "192.168.4.200"
 	gateway, mask := "192.168.4.1", "255.255.255.0"
 	snapshot.Network.DHCPStart = &start
@@ -85,10 +105,54 @@ func TestMapActivationUsesModelMappings(t *testing.T) {
 
 func TestMapActivationFailsWhenMappingIsMissing(t *testing.T) {
 	var snapshot activationSnapshot
+	snapshot.Network = &struct {
+		DHCPEnabled      bool    `json:"dhcp_enabled"`
+		DHCPStart        *string `json:"dhcp_start"`
+		DHCPEnd          *string `json:"dhcp_end"`
+		DHCPGateway      *string `json:"dhcp_gateway"`
+		DHCPSubnetMask   *string `json:"dhcp_subnet_mask"`
+		DHCPLeaseSeconds *int    `json:"dhcp_lease_seconds"`
+		DNSPrimary       *string `json:"dns_primary"`
+		DNSSecondary     *string `json:"dns_secondary"`
+	}{}
 	start := "192.168.4.100"
 	snapshot.Network.DHCPStart = &start
 	_, err := (&Dispatcher{}).mapActivation(snapshot, "DHCP", map[string]parameterMapping{})
 	if err == nil {
 		t.Fatal("expected missing mapping error")
+	}
+}
+
+func TestApplyCollectedWiFiMappingsUsesSSIDLinkedToRadio(t *testing.T) {
+	mappings := map[string]parameterMapping{
+		"wifi.24.ssid":          {Name: "Device.WiFi.SSID.1.SSID", Type: "string"},
+		"wifi.24.security_mode": {Name: "Device.WiFi.AccessPoint.1.Security.ModeEnabled", Type: "string"},
+		"wifi.24.password":      {Name: "Device.WiFi.AccessPoint.1.Security.KeyPassphrase", Type: "string"},
+		"wifi.5.ssid":           {Name: "Device.WiFi.SSID.2.SSID", Type: "string"},
+		"wifi.5.security_mode":  {Name: "Device.WiFi.AccessPoint.2.Security.ModeEnabled", Type: "string"},
+		"wifi.5.password":       {Name: "Device.WiFi.AccessPoint.2.Security.KeyPassphrase", Type: "string"},
+	}
+	collected := map[string]string{
+		"Device.WiFi.SSID.1.LowerLayers":          "Device.WiFi.Radio.1.",
+		"Device.WiFi.SSID.1.Enable":               "1",
+		"Device.WiFi.SSID.2.LowerLayers":          "Device.WiFi.Radio.1.",
+		"Device.WiFi.SSID.2.Enable":               "0",
+		"Device.WiFi.SSID.3.LowerLayers":          "Device.WiFi.Radio.2.",
+		"Device.WiFi.SSID.3.Enable":               "true",
+		"Device.WiFi.AccessPoint.1.SSIDReference": "Device.WiFi.SSID.1.",
+		"Device.WiFi.AccessPoint.2.SSIDReference": "Device.WiFi.SSID.2.",
+		"Device.WiFi.AccessPoint.3.SSIDReference": "Device.WiFi.SSID.3.",
+	}
+
+	applyCollectedWiFiMappings(collected, mappings)
+
+	if got := mappings["wifi.5.ssid"].Name; got != "Device.WiFi.SSID.3.SSID" {
+		t.Fatalf("5 GHz SSID mapping = %s", got)
+	}
+	if got := mappings["wifi.5.password"].Name; got != "Device.WiFi.AccessPoint.3.Security.KeyPassphrase" {
+		t.Fatalf("5 GHz password mapping = %s", got)
+	}
+	if got := mappings["wifi.24.ssid"].Name; got != "Device.WiFi.SSID.1.SSID" {
+		t.Fatalf("2.4 GHz SSID mapping = %s", got)
 	}
 }

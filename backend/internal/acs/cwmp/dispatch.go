@@ -32,7 +32,8 @@ func NewDispatcher(pool *pgxpool.Pool, tenantSlug string, decryptor Decryptor, a
 }
 
 type activationSnapshot struct {
-	WiFi []struct {
+	BandSteeringEnabled *bool `json:"band_steering_enabled"`
+	WiFi                []struct {
 		Band              string `json:"band"`
 		SSID              string `json:"ssid"`
 		EncryptedPassword string `json:"encrypted_password"`
@@ -42,7 +43,7 @@ type activationSnapshot struct {
 		BandwidthMHz      *int   `json:"bandwidth_mhz"`
 		Enabled           bool   `json:"enabled"`
 	} `json:"wifi"`
-	Network struct {
+	Network *struct {
 		DHCPEnabled      bool    `json:"dhcp_enabled"`
 		DHCPStart        *string `json:"dhcp_start"`
 		DHCPEnd          *string `json:"dhcp_end"`
@@ -114,6 +115,9 @@ func (d *Dispatcher) Next(ctx context.Context, sessionID string) (OutboundComman
 			}
 			mappings, err := loadParameterMappings(ctx, tx, tenantID, *routerModelID)
 			if err != nil {
+				return err
+			}
+			if err := resolveWiFiMappings(ctx, tx, tenantID, routerID, mappings); err != nil {
 				return err
 			}
 			mapped, err := d.mapActivation(parameters.Configuration, parameters.Scope, mappings)
@@ -230,7 +234,7 @@ func (d *Dispatcher) Complete(ctx context.Context, sessionID string, result Comm
 			if marshalErr != nil {
 				return marshalErr
 			}
-			if _, updateErr := tx.Exec(ctx, `UPDATE acs.routers SET collected_parameters=$2,last_sync_at=now(),software_version=COALESCE(NULLIF($2::jsonb->>'Device.DeviceInfo.SoftwareVersion',''),software_version),hardware_version=COALESCE(NULLIF($2::jsonb->>'Device.DeviceInfo.HardwareVersion',''),hardware_version) WHERE tenant_id=$1 AND id=$3`, tenantID, encodedCollected, routerID); updateErr != nil {
+			if _, updateErr := tx.Exec(ctx, `UPDATE acs.routers SET collected_parameters=$2,last_sync_at=now(),software_version=COALESCE(NULLIF($2::jsonb->>'Device.DeviceInfo.SoftwareVersion',''),software_version),hardware_version=COALESCE(NULLIF($2::jsonb->>'Device.DeviceInfo.HardwareVersion',''),hardware_version),band_steering_enabled=CASE WHEN $2::jsonb ? 'Device.WiFi.X_TP_BandSteering.Enable' THEN lower($2::jsonb->>'Device.WiFi.X_TP_BandSteering.Enable') IN ('1','true','enabled') ELSE band_steering_enabled END WHERE tenant_id=$1 AND id=$3`, tenantID, encodedCollected, routerID); updateErr != nil {
 				return fmt.Errorf("save collected router parameters: %w", updateErr)
 			}
 		}
@@ -326,6 +330,66 @@ func loadParameterMappings(ctx context.Context, tx pgx.Tx, tenantID, modelID str
 	return mappings, nil
 }
 
+func resolveWiFiMappings(ctx context.Context, tx pgx.Tx, tenantID, routerID string, mappings map[string]parameterMapping) error {
+	var raw []byte
+	if err := tx.QueryRow(ctx, `SELECT collected_parameters FROM acs.routers WHERE tenant_id=$1 AND id=$2`, tenantID, routerID).Scan(&raw); err != nil {
+		return fmt.Errorf("load collected router parameters: %w", err)
+	}
+	var collected map[string]string
+	if err := json.Unmarshal(raw, &collected); err != nil {
+		return fmt.Errorf("decode collected router parameters: %w", err)
+	}
+	applyCollectedWiFiMappings(collected, mappings)
+	return nil
+}
+
+// applyCollectedWiFiMappings resolves the real SSID and access-point instances.
+// Their indexes are vendor-defined and do not necessarily match the radio index.
+func applyCollectedWiFiMappings(collected map[string]string, mappings map[string]parameterMapping) {
+	for _, band := range []struct {
+		key, radio string
+	}{{"wifi.24", "1"}, {"wifi.5", "2"}} {
+		ssidIndex := ""
+		for index := 1; index <= 64; index++ {
+			prefix := fmt.Sprintf("Device.WiFi.SSID.%d.", index)
+			if collected[prefix+"LowerLayers"] == "Device.WiFi.Radio."+band.radio+"." && enabledParameter(collected[prefix+"Enable"]) {
+				ssidIndex = strconv.Itoa(index)
+				break
+			}
+		}
+		if ssidIndex == "" {
+			continue
+		}
+		ssidPrefix := "Device.WiFi.SSID." + ssidIndex + "."
+		overrideMapping(mappings, band.key+".ssid", ssidPrefix+"SSID")
+
+		ssidReference := "Device.WiFi.SSID." + ssidIndex + "."
+		for index := 1; index <= 64; index++ {
+			apPrefix := fmt.Sprintf("Device.WiFi.AccessPoint.%d.", index)
+			if collected[apPrefix+"SSIDReference"] != ssidReference {
+				continue
+			}
+			overrideMapping(mappings, band.key+".security_mode", apPrefix+"Security.ModeEnabled")
+			overrideMapping(mappings, band.key+".password", apPrefix+"Security.KeyPassphrase")
+			break
+		}
+	}
+}
+
+func overrideMapping(mappings map[string]parameterMapping, key, name string) {
+	mapping, ok := mappings[key]
+	if !ok {
+		return
+	}
+	mapping.Name = name
+	mappings[key] = mapping
+}
+
+func enabledParameter(value string) bool {
+	value = strings.TrimSpace(strings.ToLower(value))
+	return value == "1" || value == "true"
+}
+
 func (d *Dispatcher) mapActivation(snapshot activationSnapshot, scope string, mappings map[string]parameterMapping) ([]ParameterValue, error) {
 	if scope == "" {
 		scope = "ALL"
@@ -338,6 +402,11 @@ func (d *Dispatcher) mapActivation(snapshot activationSnapshot, scope string, ma
 		}
 		values = append(values, ParameterValue{Name: mapping.Name, Value: value, Type: mapping.Type})
 		return nil
+	}
+	if snapshot.BandSteeringEnabled != nil && scope == "ALL" {
+		if err := appendValue("wifi.band_steering", boolean(*snapshot.BandSteeringEnabled)); err != nil {
+			return nil, err
+		}
 	}
 	for _, radio := range snapshot.WiFi {
 		bandKey := "wifi.24"
@@ -381,6 +450,12 @@ func (d *Dispatcher) mapActivation(snapshot activationSnapshot, scope string, ma
 		}
 	}
 	network := snapshot.Network
+	if network == nil {
+		if scope == "DHCP" || scope == "DNS" {
+			return nil, errors.New("desired network configuration is not configured")
+		}
+		return values, nil
+	}
 	if scope == "DHCP" {
 		if network.DHCPSubnetMask != nil {
 			if err := appendValue("dhcp.subnet_mask", *network.DHCPSubnetMask); err != nil {

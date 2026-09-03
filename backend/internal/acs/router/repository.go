@@ -275,6 +275,11 @@ func (r *Repository) SaveConfiguration(ctx context.Context, tenantID, routerID s
 				return fmt.Errorf("save Wi-Fi radio: %w", err)
 			}
 		}
+		if configuration.BandSteeringEnabled != nil {
+			if _, err := tx.Exec(ctx, `UPDATE acs.routers SET band_steering_enabled=$3 WHERE tenant_id=$1 AND id=$2`, tenantID, routerID, *configuration.BandSteeringEnabled); err != nil {
+				return fmt.Errorf("save band steering configuration: %w", err)
+			}
+		}
 		if configuration.Network == nil {
 			return tx.QueryRow(ctx, `UPDATE acs.routers SET configuration_version = configuration_version + 1 WHERE id = $1 RETURNING configuration_version`, routerID).Scan(&result.Version)
 		}
@@ -299,7 +304,8 @@ func (r *Repository) CreateActivationCommand(ctx context.Context, tenantID, rout
 	var command Command
 	err := database.InTenantTransaction(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
 		var version int64
-		if err := tx.QueryRow(ctx, `SELECT configuration_version FROM acs.routers WHERE tenant_id=$1 AND id=$2`, tenantID, routerID).Scan(&version); errors.Is(err, pgx.ErrNoRows) {
+		var bandSteeringEnabled *bool
+		if err := tx.QueryRow(ctx, `SELECT configuration_version,band_steering_enabled FROM acs.routers WHERE tenant_id=$1 AND id=$2`, tenantID, routerID).Scan(&version, &bandSteeringEnabled); errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		} else if err != nil {
 			return fmt.Errorf("find router: %w", err)
@@ -340,7 +346,10 @@ func (r *Repository) CreateActivationCommand(ctx context.Context, tenantID, rout
 		var dhcpEnabled bool
 		var dhcpStart, dhcpEnd, dhcpGateway, dhcpSubnetMask, dnsPrimary, dnsSecondary *string
 		var lease *int
-		if err := tx.QueryRow(ctx, `SELECT host(dhcp_start),host(dhcp_end),host(dhcp_gateway),host(dhcp_subnet_mask),dhcp_enabled,dhcp_lease_seconds,host(dns_primary),host(dns_secondary) FROM acs.router_network_settings WHERE tenant_id=$1 AND router_id=$2`, tenantID, routerID).Scan(&dhcpStart, &dhcpEnd, &dhcpGateway, &dhcpSubnetMask, &dhcpEnabled, &lease, &dnsPrimary, &dnsSecondary); err != nil {
+		hasNetwork := true
+		if err := tx.QueryRow(ctx, `SELECT host(dhcp_start),host(dhcp_end),host(dhcp_gateway),host(dhcp_subnet_mask),dhcp_enabled,dhcp_lease_seconds,host(dns_primary),host(dns_secondary) FROM acs.router_network_settings WHERE tenant_id=$1 AND router_id=$2`, tenantID, routerID).Scan(&dhcpStart, &dhcpEnd, &dhcpGateway, &dhcpSubnetMask, &dhcpEnabled, &lease, &dnsPrimary, &dnsSecondary); errors.Is(err, pgx.ErrNoRows) {
+			hasNetwork = false
+		} else if err != nil {
 			return fmt.Errorf("load network configuration: %w", err)
 		}
 		if scope == "WIFI_24" || scope == "WIFI_5" {
@@ -359,13 +368,20 @@ func (r *Repository) CreateActivationCommand(ctx context.Context, tenantID, rout
 				return ErrScopeConfigurationRequired
 			}
 		}
-		if scope == "DHCP" && (dhcpStart == nil || dhcpEnd == nil || dhcpGateway == nil || dhcpSubnetMask == nil) {
+		if scope == "DHCP" && (!hasNetwork || dhcpStart == nil || dhcpEnd == nil || dhcpGateway == nil || dhcpSubnetMask == nil) {
 			return ErrScopeConfigurationRequired
 		}
-		if scope == "DNS" && dnsPrimary == nil && dnsSecondary == nil {
+		if scope == "DNS" && (!hasNetwork || (dnsPrimary == nil && dnsSecondary == nil)) {
 			return ErrScopeConfigurationRequired
 		}
-		parameters := map[string]any{"configuration_version": version, "scope": scope, "configuration": map[string]any{"wifi": wifi, "network": map[string]any{"dhcp_enabled": dhcpEnabled, "dhcp_start": dhcpStart, "dhcp_end": dhcpEnd, "dhcp_gateway": dhcpGateway, "dhcp_subnet_mask": dhcpSubnetMask, "dhcp_lease_seconds": lease, "dns_primary": dnsPrimary, "dns_secondary": dnsSecondary}}}
+		var network any
+		if hasNetwork {
+			network = map[string]any{"dhcp_enabled": dhcpEnabled, "dhcp_start": dhcpStart, "dhcp_end": dhcpEnd, "dhcp_gateway": dhcpGateway, "dhcp_subnet_mask": dhcpSubnetMask, "dhcp_lease_seconds": lease, "dns_primary": dnsPrimary, "dns_secondary": dnsSecondary}
+		}
+		if len(wifi) == 0 && !hasNetwork {
+			return ErrConfigurationRequired
+		}
+		parameters := map[string]any{"configuration_version": version, "scope": scope, "configuration": map[string]any{"wifi": wifi, "network": network, "band_steering_enabled": bandSteeringEnabled}}
 		encodedParameters, _ := json.Marshal(parameters)
 		var key any
 		if idempotencyKey != "" {

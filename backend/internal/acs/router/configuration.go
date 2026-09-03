@@ -31,8 +31,8 @@ type ActivationOverrides struct {
 }
 
 type DesiredConfiguration struct {
-	WiFi    []WiFiConfiguration  `json:"wifi"`
-	Network NetworkConfiguration `json:"network"`
+	WiFi    []WiFiConfiguration   `json:"wifi"`
+	Network *NetworkConfiguration `json:"network"`
 }
 
 type ConfigurationResult struct {

@@ -16,6 +16,7 @@ type ConfigurationStore interface {
 	SaveConfiguration(context.Context, string, string, DesiredConfiguration) (ConfigurationResult, error)
 	CreateActivationCommand(context.Context, string, string, string, string, string, ActivationOverrides) (Command, error)
 	CreateFirmwareCommand(context.Context, string, string, string, string, string) (Command, error)
+	CreateSimpleCommand(context.Context, string, string, string, string) (Command, error)
 }
 
 type Encryptor interface {
@@ -102,8 +103,8 @@ func (h *ConfigurationHandler) createCommand(w http.ResponseWriter, r *http.Requ
 	input.Type = strings.ToUpper(strings.TrimSpace(input.Type))
 	input.FirmwareID = strings.TrimSpace(input.FirmwareID)
 	input.Scope = strings.ToUpper(strings.TrimSpace(input.Scope))
-	if input.Type != "ACTIVATE" && input.Type != "UPDATE_FIRMWARE" {
-		httpserver.WriteError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "Command type must be ACTIVATE or UPDATE_FIRMWARE")
+	if input.Type != "ACTIVATE" && input.Type != "UPDATE_FIRMWARE" && input.Type != "SYNC" && input.Type != "REBOOT" && input.Type != "FACTORY_RESET" {
+		httpserver.WriteError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "Unsupported command type")
 		return
 	}
 	if input.Type == "UPDATE_FIRMWARE" && !uuidPattern.MatchString(input.FirmwareID) {
@@ -156,6 +157,8 @@ func (h *ConfigurationHandler) createCommand(w http.ResponseWriter, r *http.Requ
 	permission := "acs.router.command.activate"
 	if input.Type == "UPDATE_FIRMWARE" {
 		permission = "acs.router.command.update_firmware"
+	} else if input.Type == "REBOOT" || input.Type == "FACTORY_RESET" {
+		permission = "acs.router.command.reboot"
 	}
 	if !hasPermission(principal.Permissions, permission) {
 		httpserver.WriteError(w, r, http.StatusForbidden, "FORBIDDEN", "Permission denied")
@@ -166,8 +169,10 @@ func (h *ConfigurationHandler) createCommand(w http.ResponseWriter, r *http.Requ
 	if input.Type == "ACTIVATE" {
 		overrides := ActivationOverrides{DNSPrimary: input.DNSPrimary, DNSSecondary: input.DNSSecondary, DHCPGateway: input.DHCPGateway, DHCPSubnetMask: input.DHCPSubnetMask}
 		command, err = h.store.CreateActivationCommand(r.Context(), principal.TenantID, routerID, principal.UserID, idempotencyKey, input.Scope, overrides)
-	} else {
+	} else if input.Type == "UPDATE_FIRMWARE" {
 		command, err = h.store.CreateFirmwareCommand(r.Context(), principal.TenantID, routerID, principal.UserID, input.FirmwareID, idempotencyKey)
+	} else {
+		command, err = h.store.CreateSimpleCommand(r.Context(), principal.TenantID, routerID, principal.UserID, input.Type)
 	}
 	if errors.Is(err, ErrNotFound) {
 		httpserver.WriteError(w, r, http.StatusNotFound, "ACS_ROUTER_NOT_FOUND", "Router not found")
@@ -179,6 +184,10 @@ func (h *ConfigurationHandler) createCommand(w http.ResponseWriter, r *http.Requ
 	}
 	if errors.Is(err, ErrFirmwareUnavailable) {
 		httpserver.WriteError(w, r, http.StatusConflict, "ACS_FIRMWARE_UNAVAILABLE", "Firmware is not ready or is incompatible with the router")
+		return
+	}
+	if errors.Is(err, ErrInvalidModel) {
+		httpserver.WriteError(w, r, http.StatusConflict, "ACS_ROUTER_MODEL_INVALID", "Router model has no active TR-069 data model commands")
 		return
 	}
 	if errors.Is(err, ErrScopeConfigurationRequired) {
@@ -202,8 +211,8 @@ func hasPermission(permissions []string, expected string) bool {
 }
 
 func validateConfiguration(configuration *DesiredConfiguration) string {
-	if len(configuration.WiFi) == 0 || len(configuration.WiFi) > 2 {
-		return "One or two Wi-Fi radios are required"
+	if len(configuration.WiFi) > 2 || (len(configuration.WiFi) == 0 && configuration.Network == nil) {
+		return "One or two Wi-Fi radios or a network configuration are required"
 	}
 	bands := make(map[string]bool)
 	for index := range configuration.WiFi {
@@ -241,7 +250,10 @@ func validateConfiguration(configuration *DesiredConfiguration) string {
 			radio.Channel = nil
 		}
 	}
-	network := configuration.Network
+	if configuration.Network == nil {
+		return ""
+	}
+	network := *configuration.Network
 	if network.DHCPEnabled && (!validIP(network.DHCPStart) || !validIP(network.DHCPEnd) || network.DHCPLeaseSeconds == nil || *network.DHCPLeaseSeconds <= 0) {
 		return "DHCP start, end and a positive lease are required when DHCP is enabled"
 	}

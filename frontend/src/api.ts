@@ -48,6 +48,6 @@ export const label: Record<string, string> = {
   ACTIVE: 'Ativo', INACTIVE: 'Inativo', BLOCKED: 'Bloqueado', PENDING: 'Pendente',
   WAITING_DEVICE: 'Aguardando', PROCESSING: 'Processando', RETRY_SCHEDULED: 'Nova tentativa',
   COMPLETED: 'Concluído', FAILED: 'Falhou', CANCELED: 'Cancelado', EXPIRED: 'Expirado',
-  READY: 'Pronto', NO_FILE: 'Sem arquivo', ACTIVATE: 'Ativação', UPDATE_FIRMWARE: 'Firmware', SYNC: 'Sincronização',
+  READY: 'Pronto', NO_FILE: 'Sem arquivo', ACTIVATE: 'Ativação', UPDATE_FIRMWARE: 'Firmware', SYNC: 'Sincronização', REBOOT: 'Reinicialização', FACTORY_RESET: 'Redefinição de fábrica',
   PUBLISHED: 'Sim', DRAFT: 'Não',
 }

@@ -88,7 +88,7 @@ func (d *Dispatcher) Next(ctx context.Context, sessionID string) (OutboundComman
 		} else if err != nil {
 			return fmt.Errorf("claim command: %w", err)
 		}
-		if outbound.Type != "ACTIVATE" && outbound.Type != "UPDATE_FIRMWARE" && outbound.Type != "SYNC" {
+		if outbound.Type != "ACTIVATE" && outbound.Type != "UPDATE_FIRMWARE" && outbound.Type != "SYNC" && outbound.Type != "REBOOT" && outbound.Type != "FACTORY_RESET" {
 			return fmt.Errorf("unsupported command type %s", outbound.Type)
 		}
 		if err := tx.QueryRow(ctx, `
@@ -121,7 +121,7 @@ func (d *Dispatcher) Next(ctx context.Context, sessionID string) (OutboundComman
 				return err
 			}
 			outbound.Parameters = mapped
-		} else {
+		} else if outbound.Type == "UPDATE_FIRMWARE" {
 			var parameters struct {
 				FirmwareID string `json:"firmware_id"`
 			}
@@ -222,6 +222,17 @@ func (d *Dispatcher) Complete(ctx context.Context, sessionID string, result Comm
 		commandResult := map[string]any{"applied": true}
 		if commandType == "SYNC" {
 			commandResult = map[string]any{"parameters": result.Parameters}
+			collected := make(map[string]string, len(result.Parameters))
+			for _, parameter := range result.Parameters {
+				collected[parameter.Name] = parameter.Value
+			}
+			encodedCollected, marshalErr := json.Marshal(collected)
+			if marshalErr != nil {
+				return marshalErr
+			}
+			if _, updateErr := tx.Exec(ctx, `UPDATE acs.routers SET collected_parameters=$2,last_sync_at=now(),software_version=COALESCE(NULLIF($2::jsonb->>'Device.DeviceInfo.SoftwareVersion',''),software_version),hardware_version=COALESCE(NULLIF($2::jsonb->>'Device.DeviceInfo.HardwareVersion',''),hardware_version) WHERE tenant_id=$1 AND id=$3`, tenantID, encodedCollected, routerID); updateErr != nil {
+				return fmt.Errorf("save collected router parameters: %w", updateErr)
+			}
 		}
 		encodedResult, err := json.Marshal(commandResult)
 		if err != nil {

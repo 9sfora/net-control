@@ -63,6 +63,9 @@ func (r *Repository) GetRouter(ctx context.Context, tenantID, routerID string) (
 		} else if err != nil {
 			return fmt.Errorf("get router: %w", err)
 		}
+		if err := tx.QueryRow(ctx, `SELECT collected_parameters,last_sync_at FROM acs.routers WHERE tenant_id=$1 AND id=$2`, tenantID, routerID).Scan(&detail.CollectedParameters, &detail.LastSyncAt); err != nil {
+			return fmt.Errorf("get collected router parameters: %w", err)
+		}
 
 		wifiRows, err := tx.Query(ctx, `SELECT band,ssid,length(encrypted_password)>0,security_mode,channel,channel_mode,bandwidth_mhz,enabled FROM acs.router_wifi_radios WHERE tenant_id=$1 AND router_id=$2 ORDER BY band`, tenantID, routerID)
 		if err != nil {
@@ -159,7 +162,7 @@ func (r *Repository) BlockRouter(ctx context.Context, tenantID, routerID, userID
 		if result.RowsAffected() == 0 {
 			return ErrNotFound
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO acs.router_commands(tenant_id,router_id,created_by,type,priority) VALUES($1,$2,$3,'BLOCK','CRITICAL')`, tenantID, routerID, userID)
+		_, err = tx.Exec(ctx, `INSERT INTO acs.router_commands(tenant_id,router_id,created_by,type,priority,status,completed_at,result) VALUES($1,$2,$3,'BLOCK','CRITICAL','COMPLETED',now(),'{"blocked":true}'::jsonb)`, tenantID, routerID, userID)
 		return err
 	})
 }

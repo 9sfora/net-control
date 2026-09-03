@@ -1,6 +1,9 @@
 package router
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type Unknown struct {
 	ID              string            `json:"id"`
@@ -69,12 +72,14 @@ type RecentCommand struct {
 
 type Detail struct {
 	Summary
-	InformCount       int64                 `json:"inform_count"`
-	FirmwareUpdatedAt *time.Time            `json:"firmware_updated_at"`
-	WiFi              []WiFiView            `json:"wifi"`
-	Network           *NetworkConfiguration `json:"network"`
-	Sessions          []Session             `json:"sessions"`
-	Commands          []RecentCommand       `json:"commands"`
+	InformCount         int64                 `json:"inform_count"`
+	FirmwareUpdatedAt   *time.Time            `json:"firmware_updated_at"`
+	WiFi                []WiFiView            `json:"wifi"`
+	Network             *NetworkConfiguration `json:"network"`
+	Sessions            []Session             `json:"sessions"`
+	Commands            []RecentCommand       `json:"commands"`
+	CollectedParameters json.RawMessage       `json:"collected_parameters"`
+	LastSyncAt          *time.Time            `json:"last_sync_at"`
 }
 
 type WiFiView struct {

@@ -108,6 +108,43 @@ func (r *Repository) CreateFirmwareCommand(ctx context.Context, tenantID, router
 	return command, err
 }
 
+func (r *Repository) CreateSimpleCommand(ctx context.Context, tenantID, routerID, userID, commandType string) (Command, error) {
+	var command Command
+	err := database.InTenantTransaction(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		parameters := map[string]any{}
+		if commandType == "SYNC" {
+			rows, err := tx.Query(ctx, `SELECT DISTINCT split_part(c.parameter_path,'.',1)||'.' FROM acs.routers r JOIN acs.router_models m ON m.id=r.router_model_id AND m.tenant_id=r.tenant_id JOIN acs.tr069_data_model_commands c ON c.data_model_id=m.tr069_data_model_id AND c.tenant_id=m.tenant_id WHERE r.tenant_id=$1 AND r.id=$2 AND c.active ORDER BY 1`, tenantID, routerID)
+			if err != nil {
+				return err
+			}
+			items := make([]map[string]string, 0)
+			for rows.Next() {
+				var name string
+				if err := rows.Scan(&name); err != nil {
+					rows.Close()
+					return err
+				}
+				items = append(items, map[string]string{"name": name, "type": "string"})
+			}
+			rows.Close()
+			if len(items) == 0 {
+				return ErrInvalidModel
+			}
+			parameters["parameters"] = items
+		}
+		encoded, _ := json.Marshal(parameters)
+		err := tx.QueryRow(ctx, `INSERT INTO acs.router_commands(tenant_id,router_id,created_by,type,parameters,priority) SELECT $1,$2,$3,$4,$5,'HIGH' WHERE EXISTS(SELECT 1 FROM acs.routers WHERE tenant_id=$1 AND id=$2) RETURNING id,router_id,type,status,priority,parameters,idempotency_key`, tenantID, routerID, userID, commandType, encoded).Scan(&command.ID, &command.RouterID, &command.Type, &command.Status, &command.Priority, &encoded, &command.IdempotencyKey)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err == nil {
+			err = json.Unmarshal(encoded, &command.Parameters)
+		}
+		return err
+	})
+	return command, err
+}
+
 func (r *Repository) Configure(ctx context.Context, tenantID, unknownID string, input ConfigureUnknownInput) (Router, error) {
 	var configured Router
 	err := database.InTenantTransaction(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
@@ -226,19 +263,22 @@ func (r *Repository) SaveConfiguration(ctx context.Context, tenantID, routerID s
 		} else if err != nil {
 			return fmt.Errorf("lock router: %w", err)
 		}
-		if _, err := tx.Exec(ctx, `DELETE FROM acs.router_wifi_radios WHERE tenant_id = $1 AND router_id = $2`, tenantID, routerID); err != nil {
-			return fmt.Errorf("replace Wi-Fi configuration: %w", err)
-		}
 		for _, radio := range configuration.WiFi {
 			if _, err := tx.Exec(ctx, `
 				INSERT INTO acs.router_wifi_radios
 					(tenant_id, router_id, band, ssid, encrypted_password, security_mode, channel, channel_mode, bandwidth_mhz, enabled)
-				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, tenantID, routerID, radio.Band, radio.SSID,
+				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+				ON CONFLICT(router_id,band) DO UPDATE SET ssid=EXCLUDED.ssid,encrypted_password=EXCLUDED.encrypted_password,
+				security_mode=EXCLUDED.security_mode,channel=EXCLUDED.channel,channel_mode=EXCLUDED.channel_mode,
+				bandwidth_mhz=EXCLUDED.bandwidth_mhz,enabled=EXCLUDED.enabled`, tenantID, routerID, radio.Band, radio.SSID,
 				radio.EncryptedPassword, radio.SecurityMode, radio.Channel, radio.ChannelMode, radio.BandwidthMHz, radio.Enabled); err != nil {
 				return fmt.Errorf("save Wi-Fi radio: %w", err)
 			}
 		}
-		network := configuration.Network
+		if configuration.Network == nil {
+			return tx.QueryRow(ctx, `UPDATE acs.routers SET configuration_version = configuration_version + 1 WHERE id = $1 RETURNING configuration_version`, routerID).Scan(&result.Version)
+		}
+		network := *configuration.Network
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO acs.router_network_settings
 				(tenant_id,router_id,dhcp_enabled,dhcp_start,dhcp_end,dhcp_gateway,dhcp_subnet_mask,dhcp_lease_seconds,dns_primary,dns_secondary)

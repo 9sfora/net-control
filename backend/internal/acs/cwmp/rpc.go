@@ -46,7 +46,22 @@ func EncodeCommand(command OutboundCommand) []byte {
 	if command.Type == "SYNC" {
 		return GetParameterValues(command)
 	}
+	if command.Type == "REBOOT" || command.Type == "FACTORY_RESET" {
+		return SimpleRPC(command)
+	}
 	return SetParameterValues(command)
+}
+
+func SimpleRPC(command OutboundCommand) []byte {
+	method, content := "Reboot", "<CommandKey>"+parameterKey(command.ID)+"</CommandKey>"
+	if command.Type == "FACTORY_RESET" {
+		method, content = "FactoryReset", ""
+	}
+	var body bytes.Buffer
+	body.WriteString(`<?xml version="1.0" encoding="UTF-8"?><soap-env:Envelope xmlns:soap-env="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-2"><soap-env:Header><cwmp:ID soap-env:mustUnderstand="1">`)
+	escape(&body, command.AttemptID)
+	body.WriteString(`</cwmp:ID></soap-env:Header><soap-env:Body><cwmp:` + method + `>` + content + `</cwmp:` + method + `></soap-env:Body></soap-env:Envelope>`)
+	return body.Bytes()
 }
 
 func GetParameterValues(command OutboundCommand) []byte {
@@ -120,7 +135,9 @@ func ParseCommandResult(payload []byte) (CommandResult, error) {
 					} `xml:"Value"`
 				} `xml:"ParameterList>ParameterValueStruct"`
 			} `xml:"GetParameterValuesResponse"`
-			DownloadResponse *struct {
+			RebootResponse       *struct{} `xml:"RebootResponse"`
+			FactoryResetResponse *struct{} `xml:"FactoryResetResponse"`
+			DownloadResponse     *struct {
 				Status string `xml:"Status"`
 			} `xml:"DownloadResponse"`
 			TransferComplete *struct {
@@ -160,6 +177,14 @@ func ParseCommandResult(payload []byte) (CommandResult, error) {
 			}
 			result.Parameters = append(result.Parameters, ParameterValue{Name: parameter.Name, Value: parameter.Value.Value, Type: valueType})
 		}
+		return result, nil
+	}
+	if message.Body.RebootResponse != nil {
+		result.Kind = "REBOOT"
+		return result, nil
+	}
+	if message.Body.FactoryResetResponse != nil {
+		result.Kind = "FACTORY_RESET"
 		return result, nil
 	}
 	if message.Body.DownloadResponse != nil {

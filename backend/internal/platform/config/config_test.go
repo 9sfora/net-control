@@ -12,6 +12,7 @@ func TestLoad(t *testing.T) {
 	t.Setenv("AUTH_TOKEN_SECRET", "test-secret-with-at-least-32-characters")
 	t.Setenv("APPLICATION_FQDN", "net-control.example.com")
 	t.Setenv("ACS_FQDN", "acs.example.com")
+	t.Setenv("ACS_PUBLIC_URL", "http://acs.example.com:8080")
 	t.Setenv("ACS_DEFAULT_TENANT_SLUG", "netcontrol")
 	t.Setenv("ACS_COOKIE_SECURE", "false")
 	t.Setenv("WIFI_ENCRYPTION_KEY", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
@@ -25,6 +26,9 @@ func TestLoad(t *testing.T) {
 	}
 	if cfg.ACSCookieSecure {
 		t.Fatal("ACS cookie should not be secure in this test")
+	}
+	if cfg.ACSPublicURL != "http://acs.example.com:8080" {
+		t.Fatalf("unexpected ACS public URL: %s", cfg.ACSPublicURL)
 	}
 }
 

@@ -25,10 +25,15 @@ func NewDeliveryHandler(pool *pgxpool.Pool, tenantSlug string, storage *Storage)
 }
 func (h *DeliveryHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /firmwares/{id}/download", h.download)
+	mux.HandleFunc("GET /firmwares/{id}/download/{token}", h.download)
+	mux.HandleFunc("GET /f/{token}", h.download)
 }
 func (h *DeliveryHandler) download(w http.ResponseWriter, r *http.Request) {
-	id, token := r.PathValue("id"), r.URL.Query().Get("token")
-	if !uuidPattern.MatchString(id) || !uuidPattern.MatchString(token) {
+	id, token := r.PathValue("id"), r.PathValue("token")
+	if token == "" {
+		token = r.URL.Query().Get("token")
+	}
+	if (id != "" && !uuidPattern.MatchString(id)) || !uuidPattern.MatchString(token) {
 		http.NotFound(w, r)
 		return
 	}
@@ -66,7 +71,7 @@ func (h *DeliveryHandler) resolve(ctx context.Context, id, token string, path, n
 		return err
 	}
 	return database.InTenantTransaction(ctx, h.pool, tenantID, func(tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `SELECT f.file_path,f.file_name,f.checksum_sha256,f.file_size FROM acs.firmwares f JOIN acs.router_commands c ON c.tenant_id=f.tenant_id AND c.parameters->>'firmware_id'=f.id::text JOIN acs.router_command_attempts a ON a.router_command_id=c.id AND a.tenant_id=c.tenant_id WHERE f.tenant_id=$1 AND f.id=$2 AND a.id=$3 AND f.active AND f.status='READY' AND c.type='UPDATE_FIRMWARE' AND c.status='PROCESSING' AND a.status IN('PROCESSING','COMPLETED')`, tenantID, id, token).Scan(path, name, checksum, size)
+		err := tx.QueryRow(ctx, `SELECT f.file_path,f.file_name,f.checksum_sha256,f.file_size FROM acs.firmwares f JOIN acs.router_commands c ON c.tenant_id=f.tenant_id AND c.parameters->>'firmware_id'=f.id::text JOIN acs.router_command_attempts a ON a.router_command_id=c.id AND a.tenant_id=c.tenant_id WHERE f.tenant_id=$1 AND ($2='' OR f.id=nullif($2,'')::uuid) AND a.id=$3 AND f.active AND f.status='READY' AND c.type='UPDATE_FIRMWARE' AND c.status='PROCESSING' AND a.status IN('PROCESSING','COMPLETED')`, tenantID, id, token).Scan(path, name, checksum, size)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}

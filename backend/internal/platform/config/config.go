@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -20,6 +21,7 @@ type Config struct {
 	AuthTokenTTL             time.Duration
 	ApplicationFQDN          string
 	ACSFQDN                  string
+	ACSPublicURL             string
 	ACSDefaultTenantSlug     string
 	ACSCookieSecure          bool
 	WiFiEncryptionKey        string
@@ -42,6 +44,7 @@ func Load() (Config, error) {
 		AuthTokenTTL:             duration("AUTH_TOKEN_TTL", 15*time.Minute),
 		ApplicationFQDN:          strings.ToLower(strings.TrimSpace(os.Getenv("APPLICATION_FQDN"))),
 		ACSFQDN:                  strings.ToLower(strings.TrimSpace(os.Getenv("ACS_FQDN"))),
+		ACSPublicURL:             strings.TrimRight(strings.TrimSpace(os.Getenv("ACS_PUBLIC_URL")), "/"),
 		ACSDefaultTenantSlug:     strings.ToLower(strings.TrimSpace(os.Getenv("ACS_DEFAULT_TENANT_SLUG"))),
 		ACSCookieSecure:          boolean("ACS_COOKIE_SECURE", true),
 		WiFiEncryptionKey:        os.Getenv("WIFI_ENCRYPTION_KEY"),
@@ -72,6 +75,13 @@ func Load() (Config, error) {
 	}
 	if !validFQDN(cfg.ACSFQDN) {
 		return Config{}, errors.New("ACS_FQDN must be a valid hostname without scheme or path")
+	}
+	if cfg.ACSPublicURL == "" {
+		cfg.ACSPublicURL = "https://" + cfg.ACSFQDN
+	}
+	publicURL, err := url.Parse(cfg.ACSPublicURL)
+	if err != nil || (publicURL.Scheme != "http" && publicURL.Scheme != "https") || publicURL.Host == "" || publicURL.Path != "" {
+		return Config{}, errors.New("ACS_PUBLIC_URL must be an HTTP(S) URL without path")
 	}
 	if cfg.ApplicationFQDN == cfg.ACSFQDN {
 		return Config{}, errors.New("APPLICATION_FQDN and ACS_FQDN must be different")

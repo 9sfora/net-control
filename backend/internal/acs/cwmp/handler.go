@@ -114,6 +114,12 @@ func (h *Handler) complete(w http.ResponseWriter, r *http.Request, body []byte) 
 		http.Error(w, "ACS unavailable", http.StatusServiceUnavailable)
 		return
 	}
+	if result.Kind == "TRANSFER_COMPLETE" {
+		w.Header().Set("Content-Type", "text/xml; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(TransferCompleteResponse())
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

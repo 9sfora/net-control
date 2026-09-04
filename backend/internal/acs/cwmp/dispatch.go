@@ -139,7 +139,7 @@ func (d *Dispatcher) Next(ctx context.Context, sessionID string) (OutboundComman
 			} else if err != nil {
 				return err
 			}
-			outbound.Download = &DownloadRequest{URL: fmt.Sprintf("%s/firmwares/%s/download?token=%s", d.acsBaseURL, parameters.FirmwareID, outbound.AttemptID), FileSize: size, FileName: name}
+			outbound.Download = &DownloadRequest{URL: fmt.Sprintf("%s/f/%s", d.acsBaseURL, outbound.AttemptID), FileSize: size, FileName: name}
 		}
 		if _, err := tx.Exec(ctx, `UPDATE acs.router_commands SET status='PROCESSING', attempts_count=$2, started_at=COALESCE(started_at,now()), last_attempt_at=now(), next_attempt_at=NULL WHERE id=$1`, outbound.ID, attemptNumber); err != nil {
 			return fmt.Errorf("start command: %w", err)
@@ -264,7 +264,13 @@ func (d *Dispatcher) Complete(ctx context.Context, sessionID string, result Comm
 
 func (d *Dispatcher) completeTransfer(ctx context.Context, tx pgx.Tx, tenantID, sessionID string, result CommandResult) error {
 	var commandID, routerID, firmwareID string
-	err := tx.QueryRow(ctx, `SELECT c.id,c.router_id,c.parameters->>'firmware_id' FROM acs.router_commands c WHERE c.tenant_id=$1 AND c.id=$2 AND c.type='UPDATE_FIRMWARE' AND c.status='PROCESSING' FOR UPDATE`, tenantID, result.CommandKey).Scan(&commandID, &routerID, &firmwareID)
+	err := tx.QueryRow(ctx, `
+		SELECT c.id,c.router_id,c.parameters->>'firmware_id'
+		FROM acs.router_commands c
+		JOIN acs.router_sessions s ON s.router_id=c.router_id AND s.tenant_id=c.tenant_id
+		WHERE c.tenant_id=$1 AND s.id=$2 AND c.type='UPDATE_FIRMWARE' AND c.status='PROCESSING'
+		  AND ($3='' OR replace(c.id::text,'-','')=$3 OR c.id::text=$3)
+		ORDER BY c.started_at DESC LIMIT 1 FOR UPDATE OF c`, tenantID, sessionID, result.CommandKey).Scan(&commandID, &routerID, &firmwareID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNoCommand
 	}

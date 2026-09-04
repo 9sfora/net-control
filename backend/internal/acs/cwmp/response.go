@@ -14,3 +14,10 @@ func InformResponse(id string) []byte {
 		`<soap-env:Body><cwmp:InformResponse><MaxEnvelopes>1</MaxEnvelopes></cwmp:InformResponse></soap-env:Body>` +
 		`</soap-env:Envelope>`)
 }
+
+func TransferCompleteResponse() []byte {
+	return []byte(`<?xml version="1.0" encoding="UTF-8"?>` +
+		`<soap-env:Envelope xmlns:soap-env="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">` +
+		`<soap-env:Body><cwmp:TransferCompleteResponse/></soap-env:Body>` +
+		`</soap-env:Envelope>`)
+}

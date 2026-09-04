@@ -87,7 +87,7 @@ func Download(command OutboundCommand) []byte {
 	body.WriteString(`<soap-env:Envelope xmlns:soap-env="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-2"><soap-env:Header><cwmp:ID soap-env:mustUnderstand="1">`)
 	escape(&body, command.AttemptID)
 	body.WriteString(`</cwmp:ID></soap-env:Header><soap-env:Body><cwmp:Download><CommandKey>`)
-	escape(&body, command.ID)
+	escape(&body, parameterKey(command.ID))
 	body.WriteString(`</CommandKey><FileType>1 Firmware Upgrade Image</FileType><URL>`)
 	escape(&body, command.Download.URL)
 	body.WriteString(`</URL><Username></Username><Password></Password><FileSize>`)

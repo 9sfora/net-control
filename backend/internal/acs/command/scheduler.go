@@ -120,8 +120,9 @@ func (s *Scheduler) runTenant(ctx context.Context, tenantID string) (Result, err
 			LEFT JOIN LATERAL (
 				SELECT id FROM acs.router_command_attempts WHERE router_command_id=c.id AND status='PROCESSING' ORDER BY started_at DESC LIMIT 1
 			) a ON true
-			WHERE c.tenant_id=$1 AND c.status='PROCESSING' AND c.last_attempt_at < $2
-			FOR UPDATE OF c SKIP LOCKED`, tenantID, now.Add(-s.processingTimeout))
+			WHERE c.tenant_id=$1 AND c.status='PROCESSING'
+			  AND c.last_attempt_at < CASE WHEN c.type='UPDATE_FIRMWARE' THEN $3::timestamptz ELSE $2::timestamptz END
+			FOR UPDATE OF c SKIP LOCKED`, tenantID, now.Add(-s.processingTimeout), now.Add(-firmwareProcessingTimeout(s.processingTimeout)))
 		if err != nil {
 			return fmt.Errorf("find stuck commands: %w", err)
 		}
@@ -168,6 +169,13 @@ func (s *Scheduler) runTenant(ctx context.Context, tenantID string) (Result, err
 		return nil
 	})
 	return result, err
+}
+
+func firmwareProcessingTimeout(defaultTimeout time.Duration) time.Duration {
+	if defaultTimeout > 30*time.Minute {
+		return defaultTimeout
+	}
+	return 30 * time.Minute
 }
 
 func (s *Scheduler) retryDelay(attempts int) time.Duration {

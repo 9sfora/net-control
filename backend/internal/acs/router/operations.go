@@ -18,7 +18,7 @@ func (r *Repository) ListRouters(ctx context.Context, tenantID string, filter Li
 		rows, err := tx.Query(ctx, `
 			SELECT r.id,r.name,r.manufacturer,r.oui,r.product_class,r.serial_number,r.software_version,r.hardware_version,r.router_model_id,r.hardware_version_id,
 			       r.desired_status,r.reported_status,r.first_seen_at,r.last_seen_at,r.created_at,r.last_inform_at,
-			       host(r.last_ip_address),r.configuration_version,r.updated_at,
+			       host(r.last_ip_address),r.configuration_version,r.configuration_pending,r.updated_at,
 			       (SELECT m.name FROM acs.router_models m WHERE m.id=r.router_model_id),
 			       (SELECT h.version FROM acs.router_model_hardware_versions h WHERE h.id=r.hardware_version_id)
 			FROM acs.routers r
@@ -54,7 +54,7 @@ func (r *Repository) GetRouter(ctx context.Context, tenantID, routerID string) (
 		row := tx.QueryRow(ctx, `
 			SELECT r.id,r.name,r.manufacturer,r.oui,r.product_class,r.serial_number,r.software_version,r.hardware_version,r.router_model_id,r.hardware_version_id,
 			       r.desired_status,r.reported_status,r.first_seen_at,r.last_seen_at,r.created_at,r.last_inform_at,
-			       host(r.last_ip_address),r.configuration_version,r.updated_at,
+			       host(r.last_ip_address),r.configuration_version,r.configuration_pending,r.updated_at,
 			       (SELECT m.name FROM acs.router_models m WHERE m.id=r.router_model_id),
 			       (SELECT h.version FROM acs.router_model_hardware_versions h WHERE h.id=r.hardware_version_id)
 			FROM acs.routers r WHERE r.tenant_id=$1 AND r.id=$2`, tenantID, routerID)
@@ -170,7 +170,7 @@ func (r *Repository) BlockRouter(ctx context.Context, tenantID, routerID, userID
 func scanSummary(row scanner, item *Summary) error {
 	return row.Scan(&item.ID, &item.Name, &item.Manufacturer, &item.OUI, &item.ProductClass, &item.SerialNumber,
 		&item.SoftwareVersion, &item.HardwareVersion, &item.RouterModelID, &item.HardwareVersionID, &item.DesiredStatus, &item.ReportedStatus, &item.FirstSeenAt,
-		&item.LastSeenAt, &item.CreatedAt, &item.LastInformAt, &item.LastIPAddress, &item.ConfigurationVersion, &item.UpdatedAt,
+		&item.LastSeenAt, &item.CreatedAt, &item.LastInformAt, &item.LastIPAddress, &item.ConfigurationVersion, &item.ConfigurationPending, &item.UpdatedAt,
 		&item.RouterModelName, &item.CatalogHardwareVersion)
 }
 

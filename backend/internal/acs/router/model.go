@@ -46,6 +46,7 @@ type Summary struct {
 	LastInformAt           *time.Time `json:"last_inform_at"`
 	LastIPAddress          *string    `json:"last_ip_address"`
 	ConfigurationVersion   int64      `json:"configuration_version"`
+	ConfigurationPending   bool       `json:"configuration_pending"`
 	UpdatedAt              time.Time  `json:"updated_at"`
 	RouterModelName        *string    `json:"router_model_name"`
 	CatalogHardwareVersion *string    `json:"catalog_hardware_version"`

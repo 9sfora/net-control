@@ -85,7 +85,7 @@ func (d *Dispatcher) Next(ctx context.Context, sessionID string) (OutboundComman
 			  AND available_at <= now() AND attempts_count < max_attempts
 			ORDER BY CASE priority WHEN 'CRITICAL' THEN 1 WHEN 'HIGH' THEN 2 WHEN 'NORMAL' THEN 3 ELSE 4 END, created_at
 			FOR UPDATE SKIP LOCKED LIMIT 1`, tenantID, routerID).Scan(&outbound.ID, &outbound.Type, &raw, &attemptNumber); errors.Is(err, pgx.ErrNoRows) {
-			return ErrNoCommand
+			return prepareAutomaticSync(ctx, tx, tenantID, sessionID, routerID, &outbound)
 		} else if err != nil {
 			return fmt.Errorf("claim command: %w", err)
 		}
@@ -166,6 +166,9 @@ func (d *Dispatcher) Complete(ctx context.Context, sessionID string, result Comm
 			FROM acs.router_command_attempts a JOIN acs.router_commands c ON c.id=a.router_command_id
 			WHERE a.tenant_id=$1 AND a.session_id=$2 AND a.status='PROCESSING'
 			ORDER BY a.started_at DESC LIMIT 1 FOR UPDATE OF a,c`, tenantID, sessionID).Scan(&attemptID, &commandID, &routerID, &commandType, &rawCommandParameters); errors.Is(err, pgx.ErrNoRows) {
+			if result.Kind == "GET_PARAMETER_VALUES" {
+				return completeAutomaticSync(ctx, tx, tenantID, sessionID, result.Parameters)
+			}
 			return ErrNoCommand
 		} else if err != nil {
 			return fmt.Errorf("find active attempt: %w", err)
@@ -246,7 +249,7 @@ func (d *Dispatcher) Complete(ctx context.Context, sessionID string, result Comm
 			return err
 		}
 		if commandType == "ACTIVATE" {
-			if _, err := tx.Exec(ctx, `UPDATE acs.routers SET desired_status='ACTIVE',reported_status='ACTIVE' WHERE id=$1`, routerID); err != nil {
+			if _, err := tx.Exec(ctx, `UPDATE acs.routers SET desired_status='ACTIVE',reported_status='ACTIVE',configuration_pending=false WHERE id=$1`, routerID); err != nil {
 				return err
 			}
 		}
@@ -260,6 +263,61 @@ func (d *Dispatcher) Complete(ctx context.Context, sessionID string, result Comm
 		_, err = tx.Exec(ctx, `UPDATE acs.router_sessions SET status='COMPLETED',finished_at=now() WHERE id=$1`, sessionID)
 		return err
 	})
+}
+
+func prepareAutomaticSync(ctx context.Context, tx pgx.Tx, tenantID, sessionID, routerID string, outbound *OutboundCommand) error {
+	rows, err := tx.Query(ctx, `
+		SELECT DISTINCT split_part(c.parameter_path,'.',1)||'.'
+		FROM acs.routers r
+		JOIN acs.router_models m ON m.tenant_id=r.tenant_id AND m.id=r.router_model_id
+		JOIN acs.tr069_data_model_commands c ON c.tenant_id=m.tenant_id AND c.data_model_id=m.tr069_data_model_id
+		WHERE r.tenant_id=$1 AND r.id=$2 AND c.active
+		ORDER BY 1`, tenantID, routerID)
+	if err != nil {
+		return fmt.Errorf("load automatic sync parameters: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var parameter ParameterValue
+		if err := rows.Scan(&parameter.Name); err != nil {
+			return err
+		}
+		parameter.Type = "string"
+		outbound.Parameters = append(outbound.Parameters, parameter)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(outbound.Parameters) == 0 {
+		return ErrNoCommand
+	}
+	outbound.ID = "automatic-sync"
+	outbound.AttemptID = sessionID
+	outbound.Type = "SYNC"
+	_, err = tx.Exec(ctx, `UPDATE acs.router_sessions SET metadata=metadata||'{"automatic_sync":true}'::jsonb WHERE tenant_id=$1 AND id=$2`, tenantID, sessionID)
+	return err
+}
+
+func completeAutomaticSync(ctx context.Context, tx pgx.Tx, tenantID, sessionID string, parameters []ParameterValue) error {
+	var routerID string
+	if err := tx.QueryRow(ctx, `SELECT router_id FROM acs.router_sessions WHERE tenant_id=$1 AND id=$2 AND metadata->>'automatic_sync'='true' FOR UPDATE`, tenantID, sessionID).Scan(&routerID); errors.Is(err, pgx.ErrNoRows) {
+		return ErrNoCommand
+	} else if err != nil {
+		return err
+	}
+	collected := make(map[string]string, len(parameters))
+	for _, parameter := range parameters {
+		collected[parameter.Name] = parameter.Value
+	}
+	encoded, err := json.Marshal(collected)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE acs.routers SET collected_parameters=$2,last_sync_at=now(),software_version=COALESCE(NULLIF($2::jsonb->>'Device.DeviceInfo.SoftwareVersion',''),software_version),hardware_version=COALESCE(NULLIF($2::jsonb->>'Device.DeviceInfo.HardwareVersion',''),hardware_version),band_steering_enabled=CASE WHEN $2::jsonb ? 'Device.WiFi.X_TP_BandSteering.Enable' THEN lower($2::jsonb->>'Device.WiFi.X_TP_BandSteering.Enable') IN ('1','true','enabled') ELSE band_steering_enabled END WHERE tenant_id=$1 AND id=$3`, tenantID, encoded, routerID); err != nil {
+		return fmt.Errorf("save automatic sync parameters: %w", err)
+	}
+	_, err = tx.Exec(ctx, `UPDATE acs.router_sessions SET status='COMPLETED',finished_at=now(),metadata=metadata||'{"automatic_sync_completed":true}'::jsonb WHERE tenant_id=$1 AND id=$2`, tenantID, sessionID)
+	return err
 }
 
 func (d *Dispatcher) completeTransfer(ctx context.Context, tx pgx.Tx, tenantID, sessionID string, result CommandResult) error {

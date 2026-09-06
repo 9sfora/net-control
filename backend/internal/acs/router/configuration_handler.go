@@ -14,6 +14,7 @@ import (
 
 type ConfigurationStore interface {
 	SaveConfiguration(context.Context, string, string, DesiredConfiguration) (ConfigurationResult, error)
+	RevertConfiguration(context.Context, string, string) error
 	CreateActivationCommand(context.Context, string, string, string, string, string, ActivationOverrides) (Command, error)
 	CreateFirmwareCommand(context.Context, string, string, string, string, string) (Command, error)
 	CreateSimpleCommand(context.Context, string, string, string, string) (Command, error)
@@ -36,8 +37,27 @@ func NewConfigurationHandler(store ConfigurationStore, tokens *auth.TokenManager
 func (h *ConfigurationHandler) Register(mux *http.ServeMux) {
 	mux.Handle("PUT /api/v1/acs/routers/{id}/configuration",
 		auth.Authenticate(h.tokens, auth.RequirePermission("acs.router.update", http.HandlerFunc(h.save))))
+	mux.Handle("POST /api/v1/acs/routers/{id}/configuration/revert",
+		auth.Authenticate(h.tokens, auth.RequirePermission("acs.router.update", http.HandlerFunc(h.revert))))
 	mux.Handle("POST /api/v1/acs/routers/{id}/commands",
 		auth.Authenticate(h.tokens, http.HandlerFunc(h.createCommand)))
+}
+
+func (h *ConfigurationHandler) revert(w http.ResponseWriter, r *http.Request) {
+	routerID := r.PathValue("id")
+	if !uuidPattern.MatchString(routerID) {
+		httpserver.WriteError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid router ID")
+		return
+	}
+	principal, _ := auth.PrincipalFromContext(r.Context())
+	if err := h.store.RevertConfiguration(r.Context(), principal.TenantID, routerID); errors.Is(err, ErrNotFound) {
+		httpserver.WriteError(w, r, http.StatusNotFound, "ACS_ROUTER_NOT_FOUND", "Router not found")
+		return
+	} else if err != nil {
+		httpserver.WriteError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "Internal server error")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *ConfigurationHandler) save(w http.ResponseWriter, r *http.Request) {

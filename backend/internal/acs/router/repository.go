@@ -281,7 +281,7 @@ func (r *Repository) SaveConfiguration(ctx context.Context, tenantID, routerID s
 			}
 		}
 		if configuration.Network == nil {
-			return tx.QueryRow(ctx, `UPDATE acs.routers SET configuration_version = configuration_version + 1 WHERE id = $1 RETURNING configuration_version`, routerID).Scan(&result.Version)
+			return tx.QueryRow(ctx, `UPDATE acs.routers SET configuration_version = configuration_version + 1,configuration_pending=true WHERE id = $1 RETURNING configuration_version`, routerID).Scan(&result.Version)
 		}
 		network := *configuration.Network
 		if _, err := tx.Exec(ctx, `
@@ -295,9 +295,30 @@ func (r *Repository) SaveConfiguration(ctx context.Context, tenantID, routerID s
 			network.DHCPStart, network.DHCPEnd, network.DHCPGateway, network.DHCPSubnetMask, network.DHCPLeaseSeconds, network.DNSPrimary, network.DNSSecondary); err != nil {
 			return fmt.Errorf("save network configuration: %w", err)
 		}
-		return tx.QueryRow(ctx, `UPDATE acs.routers SET configuration_version = configuration_version + 1 WHERE id = $1 RETURNING configuration_version`, routerID).Scan(&result.Version)
+		return tx.QueryRow(ctx, `UPDATE acs.routers SET configuration_version = configuration_version + 1,configuration_pending=true WHERE id = $1 RETURNING configuration_version`, routerID).Scan(&result.Version)
 	})
 	return result, err
+}
+
+func (r *Repository) RevertConfiguration(ctx context.Context, tenantID, routerID string) error {
+	return database.InTenantTransaction(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		result, err := tx.Exec(ctx, `UPDATE acs.routers SET configuration_pending=false WHERE tenant_id=$1 AND id=$2`, tenantID, routerID)
+		if err != nil {
+			return fmt.Errorf("revert router configuration: %w", err)
+		}
+		if result.RowsAffected() == 0 {
+			return ErrNotFound
+		}
+		// Desired rows are discarded so the UI and the next edit start from the
+		// latest values collected from the CPE instead of stale modifications.
+		if _, err := tx.Exec(ctx, `DELETE FROM acs.router_wifi_radios WHERE tenant_id=$1 AND router_id=$2`, tenantID, routerID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM acs.router_network_settings WHERE tenant_id=$1 AND router_id=$2`, tenantID, routerID); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 func (r *Repository) CreateActivationCommand(ctx context.Context, tenantID, routerID, userID, idempotencyKey, scope string, overrides ActivationOverrides) (Command, error) {

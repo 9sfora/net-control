@@ -1,8 +1,10 @@
 import { FormEvent, ReactNode, useCallback, useEffect, useState } from "react";
 import {
   Activity,
+  ArrowRight,
   ArrowLeft,
   Bell,
+  BarChart3,
   Boxes,
   ChevronRight,
   CircleArrowUp,
@@ -10,8 +12,12 @@ import {
   Command,
   Cpu,
   Download,
+  Eye,
+  EyeOff,
   Filter,
   LogOut,
+  LockKeyhole,
+  Mail,
   Menu,
   PackageOpen,
   Plus,
@@ -19,6 +25,8 @@ import {
   RotateCcw,
   Router,
   Search,
+  Settings,
+  ShieldCheck,
   Star,
   ShieldBan,
   Trash2,
@@ -246,9 +254,11 @@ function App() {
 }
 
 function Login({ onLogin }: { onLogin: (user: Principal) => void }) {
-  const [tenant, setTenant] = useState("netcontrol"),
-    [email, setEmail] = useState(""),
-    [password, setPassword] = useState("");
+  const tenant = import.meta.env.VITE_TENANT_SLUG || "netcontrol";
+  const [email, setEmail] = useState(""),
+    [password, setPassword] = useState(""),
+    [showPassword, setShowPassword] = useState(false),
+    [remember, setRemember] = useState(true);
   const [error, setError] = useState(""),
     [loading, setLoading] = useState(false);
   async function submit(event: FormEvent) {
@@ -271,64 +281,37 @@ function Login({ onLogin }: { onLogin: (user: Principal) => void }) {
   }
   return (
     <main className="login-page">
-      <section className="login-card">
-        <div className="login-brand">
-          <span className="brand-mark">
-            <Wifi size={20} />
-          </span>
-          <span>
-            net<span>control</span>
-          </span>
-        </div>
-        <div className="login-copy">
-          <p className="eyebrow">Bem-vindo de volta</p>
-          <h1>Acesse sua conta</h1>
-          <p>Gerencie seus equipamentos de rede em um só lugar.</p>
-        </div>
-        <form onSubmit={submit}>
-          <Field label="Tenant">
-            <input
-              value={tenant}
-              onChange={(e) => setTenant(e.target.value)}
-              placeholder="netcontrol"
-              autoComplete="organization"
-              required
-            />
-          </Field>
-          <Field label="E-mail">
-            <input
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              type="email"
-              placeholder="seu@email.com"
-              autoComplete="email"
-              required
-              autoFocus
-            />
-          </Field>
-          <Field label="Senha">
-            <input
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              type="password"
-              placeholder="Sua senha"
-              autoComplete="current-password"
-              required
-            />
-          </Field>
-          {error && <div className="form-error">{error}</div>}
-          <button className="button primary login-button" disabled={loading}>
-            {loading ? (
-              <>
-                <RefreshCw className="spin" size={16} /> Entrando...
-              </>
-            ) : (
-              "Entrar"
-            )}
-          </button>
-        </form>
-        <p className="login-foot">Acesso restrito a usuários autorizados</p>
+      <section className="login-shell">
+        <aside className="login-showcase">
+          <div className="login-brand showcase-brand"><span className="brand-mark"><Wifi size={22} /></span><span>net<span>control</span></span></div>
+          <div className="showcase-copy">
+            <p className="showcase-eyebrow">Rede mais simples,<br />negócios mais fortes</p>
+            <h1>Controle sua rede<br />com mais eficiência</h1>
+            <p>Monitore, configure e gerencie seus equipamentos de rede em um só lugar, de forma simples e segura.</p>
+          </div>
+          <div className="showcase-features">
+            <div><span><BarChart3 /></span><p><strong>Visibilidade total</strong>Acompanhe o status da sua rede em tempo real.</p></div>
+            <div><span><Settings /></span><p><strong>Gestão centralizada</strong>Configure e gerencie todos os equipamentos em um só lugar.</p></div>
+            <div><span><ShieldCheck /></span><p><strong>Mais segurança</strong>Mantenha sua infraestrutura sempre protegida.</p></div>
+          </div>
+          <div className="network-illustration"><div className="signal-card"><Wifi /></div><div className="bars-card"><BarChart3 /></div><div className="router-box"><Wifi /><i /><i /><i /></div><div className="router-box lower"><span /><span /><span /><i /><i /></div></div>
+          <p className="showcase-tagline">Tecnologia que mantém<br />o seu mundo conectado.</p>
+        </aside>
+        <section className="login-card">
+          <div className="login-brand"><span className="brand-mark"><Wifi size={20} /></span><span>net<span>control</span></span></div>
+          <div className="login-copy"><p className="eyebrow">Bem-vindo de volta</p><h1>Acesse sua conta</h1><p>Gerencie seus equipamentos de rede em um só lugar.</p></div>
+          <form onSubmit={submit}>
+            <Field label="E-mail"><div className="login-input"><Mail size={18} /><input value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="admin@netcontrol.local" autoComplete="email" required autoFocus /></div></Field>
+            <Field label="Senha"><div className="login-input"><LockKeyhole size={18} /><input value={password} onChange={(e) => setPassword(e.target.value)} type={showPassword ? "text" : "password"} placeholder="Sua senha" autoComplete="current-password" required /><button type="button" onClick={() => setShowPassword(value => !value)} aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}>{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></div></Field>
+            <div className="login-options"><label><input type="checkbox" checked={remember} onChange={event => setRemember(event.target.checked)} /> <span>Lembrar de mim</span></label></div>
+            {error && <div className="form-error">{error}</div>}
+            <button className="button primary login-button" disabled={loading}>{loading ? <><RefreshCw className="spin" size={16} /> Entrando...</> : <>Entrar <ArrowRight size={18} /></>}</button>
+          </form>
+          <div className="login-divider"><span>ou</span></div>
+          <p className="login-foot"><LockKeyhole size={15} /> Acesso restrito a usuários autorizados</p>
+        </section>
       </section>
+      <footer className="login-page-footer"><span>© {new Date().getFullYear()} NetControl. Todos os direitos reservados.</span><span>Suporte &nbsp;&nbsp;&nbsp; Documentação &nbsp;&nbsp;&nbsp; Política de Privacidade</span></footer>
     </main>
   );
 }

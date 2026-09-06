@@ -778,7 +778,14 @@ function RouterDetail() {
   const parameter = (...names: string[]) => names.map(name => collected[name]).find(value => value !== undefined && value !== "");
   const matchingParameter = (pattern: RegExp) => Object.entries(collected).find(([name, value]) => pattern.test(name) && value !== "")?.[1];
   const booleanParameter = (...names: string[]) => { const value = parameter(...names); return value === undefined ? undefined : ["1", "true", "enabled", "up"].includes(value.toLowerCase()) ? "Ativo" : "Desativado"; };
-  const bandSteeringEnabled = router?.band_steering_enabled ?? ["1", "true"].includes((parameter("Device.WiFi.X_TP_BandSteering.Enable") || "").toLowerCase());
+  const reportedBandSteering = parameter("Device.WiFi.X_TP_BandSteering.Enable");
+  const bandSteeringEnabled = reportedBandSteering !== undefined
+    ? ["1", "true", "enabled", "enable", "on"].includes(reportedBandSteering.toLowerCase())
+    : (router?.band_steering_enabled ?? false);
+  useEffect(() => {
+    if (bandSteeringEnabled && (tab === "wifi24" || tab === "wifi5")) setTab("wifi");
+    if (!bandSteeringEnabled && tab === "wifi") setTab("wifi24");
+  }, [bandSteeringEnabled, tab]);
   const wanDNS = (parameter("Device.DHCPv4.Client.1.DNSServers", "Device.DNS.Relay.Forwarding.1.DNSServer") || "").split(",").map(value => value.trim()).filter(value => value && value !== "0.0.0.0"), lanDNS = (parameter("Device.DHCPv4.Server.Pool.1.DNSServers") || "").split(",").map(value => value.trim()).filter(value => value && value !== "0.0.0.0");
   async function block() { if (!confirm("Bloquear este roteador?")) return; try { await api(`/api/v1/acs/routers/${id}/block`, { method: "POST" }); state.reload() } catch (e) { alert(e instanceof Error ? e.message : "Erro ao bloquear") } }
   async function changeBandSteering(enabled: boolean) { const action = enabled ? "Habilitar" : "Desabilitar"; if (!confirm(`${action} o Band Steering? A alteração será aplicada quando você executar Ativar.`)) return; try { await api(`/api/v1/acs/routers/${id}/configuration`, { method: "PUT", body: JSON.stringify({ wifi: [], network: null, band_steering_enabled: enabled }) }); await state.reload(); setTab(enabled ? "wifi" : "wifi24"); } catch (e) { alert(e instanceof Error ? e.message : `Erro ao ${action.toLowerCase()} Band Steering`); } }

@@ -2,6 +2,7 @@ import { FormEvent, ReactNode, useCallback, useEffect, useState } from "react";
 import {
   Activity,
   ArrowLeft,
+  Bell,
   Boxes,
   ChevronRight,
   CircleArrowUp,
@@ -9,17 +10,21 @@ import {
   Command,
   Cpu,
   Download,
+  Filter,
   LogOut,
   Menu,
   PackageOpen,
   Plus,
   RefreshCw,
+  RotateCcw,
   Router,
   Search,
   Star,
   ShieldBan,
   Trash2,
   Upload,
+  Pencil,
+  TriangleAlert,
   Wifi,
   X,
 } from "lucide-react";
@@ -425,13 +430,17 @@ function Shell({ user, onLogout }: { user: Principal; onLogout: () => void }) {
           >
             <Menu />
           </button>
-          <div>
+          <div className="mobile-brand">
             <span>NetControl</span>
             <small>Módulo ACS</small>
           </div>
-          <div className="header-status">
-            <i /> Sistema operacional
+          <div className="global-search">
+            <Search size={17} />
+            <span>Buscar roteadores, comandos...</span>
+            <kbd>⌘ K</kbd>
           </div>
+          <button className="header-notification" title="Notificações"><Bell size={19} /><i /></button>
+          <div className="header-avatar">{user.name.slice(0, 2).toUpperCase()}</div>
         </header>
         <Routes>
           <Route path="/" element={<Navigate to={first} replace />} />
@@ -506,18 +515,20 @@ function Page({
   title,
   description,
   action,
+  titleExtra,
   children,
 }: {
   title: string;
   description: string;
   action?: ReactNode;
+  titleExtra?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <main className="page">
       <div className="page-title">
         <div>
-          <h1>{title}</h1>
+          <div className="page-heading"><h1>{title}</h1>{titleExtra}</div>
           <p>{description}</p>
         </div>
         {action}
@@ -791,18 +802,18 @@ function RouterDetail() {
   async function revertConfiguration() { if (!confirm("Descartar todas as alterações ainda não aplicadas?")) return; try { await api(`/api/v1/acs/routers/${id}/configuration/revert`, { method: "POST" }); await state.reload(); } catch (e) { alert(e instanceof Error ? e.message : "Erro ao reverter alterações"); } }
   async function runCommand(type: string) { if (!type) return; if (type === "BLOCK") return block(); if ((type === "REBOOT" || type === "FACTORY_RESET") && !confirm(type === "REBOOT" ? "Reiniciar este roteador?" : "Redefinir este roteador para as configurações de fábrica?")) return; try { const body: Record<string, string> = { type }; if (type === "UPDATE_FIRMWARE") { const result = await api<Envelope<Firmware[]>>("/api/v1/acs/firmwares"); const options = result.data.filter(item => item.status === "READY" && item.active && item.router_model_id === router?.router_model_id && (!item.hardware_version_id || item.hardware_version_id === router?.hardware_version_id)); const firmware = options.find(item => item.is_default) || options[0]; if (!firmware) throw new Error("Nenhum firmware compatível e publicado foi encontrado."); if (!confirm(`Atualizar para o firmware ${firmware.name} ${firmware.version}?`)) return; body.firmware_id = firmware.id; } await api(`/api/v1/acs/routers/${id}/commands`, { method: "POST", body: JSON.stringify(body) }); alert("Comando adicionado à fila."); state.reload(); } catch (e) { alert(e instanceof Error ? e.message : "Erro ao gerar comando"); } }
   const tabs: { key: RouterTab; title: string }[] = [{ key: "general", title: "Geral" }, ...(bandSteeringEnabled ? [{ key: "wifi" as RouterTab, title: "Rede 2.4/5.8 GHz" }] : [{ key: "wifi24" as RouterTab, title: "Rede 2.4 GHz" }, { key: "wifi5" as RouterTab, title: "Rede 5.8 GHz" }]), { key: "wan", title: "WAN" }, { key: "lan", title: "LAN" }];
-  return <Page title={router?.name || "Roteador"} description="Informações, redes e operação do equipamento." action={<div className="page-actions"><button className="button" onClick={() => navigate("/routers")}><ArrowLeft size={16} /> Voltar</button><button className="button" onClick={state.reload}><RefreshCw size={16} /> Atualizar</button>{router?.configuration_pending && <button className="button danger-button" onClick={revertConfiguration}>Reverter alterações</button>}<select className="action-select" defaultValue="" onChange={event => { void runCommand(event.target.value); event.target.value = ""; }}><option value="" disabled>Ações</option><option value="ACTIVATE">Ativar</option><option value="BLOCK">Bloquear</option><option value="REBOOT">Reiniciar</option><option value="FACTORY_RESET">Redefinir de fábrica</option><option value="UPDATE_FIRMWARE">Atualizar firmware</option></select><a className="button" href="#router-commands"><Command size={16} /> Listar comandos</a></div>}>
-    <State {...state} reload={state.reload} />{router && <>{router.configuration_pending && <div className="inline-error">Este roteador possui alterações que ainda não foram aplicadas.</div>}
-      <section className="detail-section router-tab-card"><div className="tabs">{tabs.map(item => <button key={item.key} className={tab === item.key ? "active" : ""} onClick={() => setTab(item.key)}>{item.title}</button>)}</div>{tab !== "general" && <div className="tab-actions">{tab === "wifi" ? <button className="button danger-button" onClick={() => void changeBandSteering(false)}>Desabilitar Band Steering</button> : (tab === "wifi24" || tab === "wifi5") && <button className="button" onClick={() => void changeBandSteering(true)}>Habilitar Band Steering</button>}<button className="button primary" onClick={() => setEditing(tab)}><Cpu size={16} /> Editar</button></div>}
+  return <Page title={router?.name || "Roteador"} titleExtra={router && <span className="operational-badge"><i /> Sistema operacional</span>} description="Informações, redes e operação do equipamento." action={<div className="page-actions"><button className="button" onClick={() => navigate("/routers")}><ArrowLeft size={16} /> Voltar</button><button className="button" onClick={state.reload}><RefreshCw size={16} /> Atualizar</button>{router?.configuration_pending && <button className="button danger-button" onClick={revertConfiguration}><RotateCcw size={16} /> Reverter alterações</button>}<select className="action-select" defaultValue="" onChange={event => { void runCommand(event.target.value); event.target.value = ""; }}><option value="" disabled>Ações</option><option value="ACTIVATE">Ativar</option><option value="BLOCK">Bloquear</option><option value="REBOOT">Reiniciar</option><option value="FACTORY_RESET">Redefinir de fábrica</option><option value="UPDATE_FIRMWARE">Atualizar firmware</option></select><a className="button primary" href="#router-commands"><Command size={16} /> Listar comandos</a></div>}>
+    <State {...state} reload={state.reload} />{router && <>{router.configuration_pending && <div className="pending-alert"><span className="pending-alert-icon"><TriangleAlert size={25} /></span><div><strong>Este roteador possui alterações que ainda não foram aplicadas.</strong><p>As configurações foram alteradas, mas ainda não estão ativas no equipamento.</p></div><button className="button" onClick={revertConfiguration}>Reverter alterações</button></div>}
+      <section className="detail-section router-tab-card"><div className="tabs">{tabs.map(item => <button key={item.key} className={tab === item.key ? "active" : ""} onClick={() => setTab(item.key)}>{item.title}</button>)}</div>{tab !== "general" && <div className="router-section-heading"><div className="section-title-copy"><span className="section-icon">{(tab === "wifi" || tab === "wifi24" || tab === "wifi5") ? <Wifi /> : <Router />}</span><div><h2>{tab === "wifi" ? "Redes Wi-Fi" : tab === "wifi24" ? "Rede 2.4 GHz" : tab === "wifi5" ? "Rede 5.8 GHz" : tab === "wan" ? "Configurações WAN" : "Configurações LAN"}</h2><p>{tab.startsWith("wifi") ? "Configurações das redes sem fio 2.4 GHz e 5 GHz." : "Parâmetros de rede configurados para este equipamento."}</p></div></div><div className="tab-actions">{tab === "wifi" ? <button className="button danger-button" onClick={() => void changeBandSteering(false)}>Desabilitar Band Steering</button> : (tab === "wifi24" || tab === "wifi5") && <button className="button" onClick={() => void changeBandSteering(true)}>Habilitar Band Steering</button>}<button className="button primary-outline" onClick={() => setEditing(tab)}><Pencil size={16} /> Editar</button></div></div>}
       {tab === "general" && <div className="info-grid">
         <Info label="Endereço IPv4" value={matchingParameter(/^Device\.IP\.Interface\.\d+\.IPv4Address\.\d+\.IPAddress$/) || router.last_ip_address} mono /><Info label="Endereço IPv6" value={matchingParameter(/^Device\.IP\.Interface\.\d+\.IPv6Address\.\d+\.IPAddress$/)} mono /><Info label="Status" value={label[router.connectivity_status] || router.connectivity_status} /><Info label="OUI" value={parameter("Device.DeviceInfo.ManufacturerOUI") || router.oui} mono /><Info label="Nome" value={router.name} /><Info label="UPNP" value={booleanParameter("Device.UPnP.Device.Enable", "Device.UPnP.Enable")} /><Info label="Modelo" value={parameter("Device.DeviceInfo.ModelName") || [router.router_model_name, router.catalog_hardware_version].filter(Boolean).join(" + ")} /><Info label="Número de série" value={parameter("Device.DeviceInfo.SerialNumber") || router.serial_number} mono /><Info label="MAC" value={parameter("Device.WiFi.SSID.1.MACAddress", "Device.Ethernet.Interface.1.MACAddress") || matchingParameter(/\.MACAddress$/)} mono /><Info label="Classe do produto" value={router.product_class} /><Info label="Firmware" value={parameter("Device.DeviceInfo.AdditionalSoftwareVersion", "Device.DeviceInfo.SoftwareVersion")} /><Info label="Versão do software" value={parameter("Device.DeviceInfo.SoftwareVersion") || router.software_version} /><Info label="Versão do hardware" value={parameter("Device.DeviceInfo.HardwareVersion") || router.catalog_hardware_version || router.hardware_version} /><Info label="Informes recebidos" value={String(router.inform_count)} /><Info label="Último informe" value={formatDate(router.last_inform_at)} /><Info label="Última sincronização" value={formatDate(router.last_sync_at)} /><Info label="Criado em" value={formatDate(router.created_at)} /><Info label="Atualizado em" value={formatDate(router.updated_at)} /><Info label="Firmware atualizado em" value={formatDate(router.firmware_updated_at)} />
       </div>}{tab === "wifi" && <div className="combined-wifi"><WiFiDetails band="2.4GHZ" router={router} parameter={parameter} booleanParameter={booleanParameter} /><WiFiDetails band="5GHZ" router={router} parameter={parameter} booleanParameter={booleanParameter} /></div>}{(tab === "wifi24" || tab === "wifi5") && <WiFiDetails band={tab === "wifi24" ? "2.4GHZ" : "5GHZ"} router={router} parameter={parameter} booleanParameter={booleanParameter} />}{tab === "wan" && <div className="info-grid"><Info label="Status" value={parameter("Device.DHCPv4.Client.1.Status", "Device.DHCPv4.Client.1.DHCPStatus")} /><Info label="Endereço IPv4" value={parameter("Device.DHCPv4.Client.1.IPAddress", "Device.IP.Interface.2.IPv4Address.1.IPAddress")} /><Info label="Gateway" value={parameter("Device.DHCPv4.Client.1.IPRouters", "Device.Routing.Router.1.IPv4Forwarding.1.GatewayIPAddress")} /><Info label="Máscara" value={parameter("Device.DHCPv4.Client.1.SubnetMask", "Device.IP.Interface.2.IPv4Address.1.SubnetMask")} /><Info label="DNS primário" value={router.network?.dns_primary || wanDNS[0]} /><Info label="DNS secundário" value={router.network?.dns_secondary || wanDNS[1]} /></div>}{tab === "lan" && <div className="info-grid"><Info label="DHCP" value={router.network ? (router.network.dhcp_enabled ? "Ativo" : "Desativado") : booleanParameter("Device.DHCPv4.Server.Pool.1.Enable", "Device.DHCPv4.Server.Enable")} /><Info label="Início do range" value={router.network?.dhcp_start || parameter("Device.DHCPv4.Server.Pool.1.MinAddress")} /><Info label="Fim do range" value={router.network?.dhcp_end || parameter("Device.DHCPv4.Server.Pool.1.MaxAddress")} /><Info label="Gateway" value={router.network?.dhcp_gateway || parameter("Device.IP.Interface.1.IPv4Address.1.IPAddress")} /><Info label="Máscara" value={router.network?.dhcp_subnet_mask || parameter("Device.DHCPv4.Server.Pool.1.SubnetMask", "Device.IP.Interface.1.IPv4Address.1.SubnetMask")} /><Info label="Tempo de concessão" value={router.network?.dhcp_lease_seconds ? `${router.network.dhcp_lease_seconds}s` : parameter("Device.DHCPv4.Server.Pool.1.LeaseTime")} /><Info label="DNS primário dos clientes" value={router.network?.dns_primary || lanDNS[0]} /><Info label="DNS secundário dos clientes" value={router.network?.dns_secondary || lanDNS[1]} /></div>}</section>
-      <section className="detail-section" id="router-commands"><h2>Comandos recentes</h2>{router.commands.length ? <Table headers={["Comando", "Status", "Tentativas", "Criado em", "Concluído em"]}>{router.commands.map(item => <tr key={item.id}><td>{label[item.type] || item.type}</td><td><Badge value={item.status} /></td><td>{item.attempts_count}</td><td>{formatDate(item.created_at)}</td><td>{formatDate(item.completed_at)}</td></tr>)}</Table> : <EmptyInline />}</section>
+      <section className="detail-section commands-card" id="router-commands"><div className="commands-header"><div className="section-title-copy"><span className="section-icon"><Command /></span><div><h2>Comandos recentes</h2><p>Histórico dos últimos comandos enviados para este roteador.</p></div></div><div className="commands-tools"><label><Search size={16} /><input placeholder="Buscar comandos..." /></label><button className="button"><Filter size={16} /> Filtros</button></div></div>{router.commands.length ? <Table headers={["Comando", "Status", "Tentativas", "Criado em", "Concluído em"]}>{router.commands.map(item => <tr key={item.id}><td>{label[item.type] || item.type}</td><td><Badge value={item.status} /></td><td>{item.attempts_count}</td><td>{formatDate(item.created_at)}</td><td>{formatDate(item.completed_at)}</td></tr>)}</Table> : <EmptyInline />}<div className="table-summary">Mostrando {router.commands.length} comando{router.commands.length === 1 ? "" : "s"}</div></section>
       <section className="detail-section"><h2>Parâmetros coletados</h2>{Object.keys(collected).length ? <Table headers={["Parâmetro", "Valor"]}>{Object.entries(collected).map(([name, value]) => <tr key={name}><td className="mono">{name}</td><td>{/(password|passphrase|presharedkey|secret)/i.test(name) && value ? "••••••••" : value || "—"}</td></tr>)}</Table> : <EmptyInline />}</section>
       {editing && <RouterConfigurationModal kind={editing} router={router} parameter={parameter} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); state.reload(); }} />}
     </>}</Page>
 }
-function WiFiDetails({ band, router, parameter, booleanParameter }: { band: string; router: RouterDetailData; parameter: (...names: string[]) => string | undefined; booleanParameter: (...names: string[]) => string | undefined }) { const wifi = router.wifi.find(item => item.band === band), index = band === "2.4GHZ" ? 1 : 2, radio = `Device.WiFi.Radio.${index}`, ssid = `Device.WiFi.SSID.${index}`, accessPoint = `Device.WiFi.AccessPoint.${index}`, password = parameter(`${accessPoint}.Security.KeyPassphrase`, `${accessPoint}.Security.PreSharedKey`); return <div className="info-grid"><Info label="SSID" value={parameter(`${ssid}.SSID`) || wifi?.ssid} /><Info label="Modo" value={parameter(`${radio}.OperatingStandards`) || wifi?.channel_mode} /><Info label="Segurança" value={parameter(`${accessPoint}.Security.ModeEnabled`) || wifi?.security_mode} /><Info label="Senha" value={password !== undefined ? (password ? "Configurada" : "Não configurada") : wifi?.password_configured ? "Configurada" : undefined} /><Info label="Canal" value={parameter(`${radio}.Channel`) || wifi?.channel?.toString()} /><Info label="Largura de banda" value={parameter(`${radio}.OperatingChannelBandwidth`) || (wifi?.bandwidth_mhz ? `${wifi.bandwidth_mhz} MHz` : undefined)} /><Info label="Potência" value={parameter(`${radio}.TransmitPower`)} /><Info label="Ativo" value={booleanParameter(`${radio}.Enable`, `${accessPoint}.Enable`) || (wifi ? (wifi.enabled ? "Ativo" : "Desativado") : undefined)} /><Info label="Visível" value={booleanParameter(`${accessPoint}.SSIDAdvertisementEnabled`)} /><Info label="Isolar clientes" value={booleanParameter(`${accessPoint}.IsolationEnable`)} /></div> }
+function WiFiDetails({ band, router, parameter, booleanParameter }: { band: string; router: RouterDetailData; parameter: (...names: string[]) => string | undefined; booleanParameter: (...names: string[]) => string | undefined }) { const wifi = router.wifi.find(item => item.band === band), index = band === "2.4GHZ" ? 1 : 2, radio = `Device.WiFi.Radio.${index}`, ssid = `Device.WiFi.SSID.${index}`, accessPoint = `Device.WiFi.AccessPoint.${index}`, password = parameter(`${accessPoint}.Security.KeyPassphrase`, `${accessPoint}.Security.PreSharedKey`), enabled = booleanParameter(`${radio}.Enable`, `${accessPoint}.Enable`) || (wifi ? (wifi.enabled ? "Ativo" : "Desativado") : undefined); return <div className="wifi-band-card"><div className="wifi-band-title"><Wifi size={24} /><h3>Rede {band === "2.4GHZ" ? "2.4" : "5"} GHz</h3>{enabled && <span className={enabled === "Ativo" ? "state-pill active" : "state-pill"}>{enabled}</span>}</div><div className="info-grid"><Info label="SSID" value={parameter(`${ssid}.SSID`) || wifi?.ssid} /><Info label="Modo" value={parameter(`${radio}.OperatingStandards`) || wifi?.channel_mode} /><Info label="Segurança" value={parameter(`${accessPoint}.Security.ModeEnabled`) || wifi?.security_mode} /><Info label="Senha" value={password !== undefined ? (password ? "Configurada" : "Não configurada") : wifi?.password_configured ? "Configurada" : undefined} /><Info label="Canal" value={parameter(`${radio}.Channel`) || wifi?.channel?.toString()} /><Info label="Largura de banda" value={parameter(`${radio}.OperatingChannelBandwidth`) || (wifi?.bandwidth_mhz ? `${wifi.bandwidth_mhz} MHz` : undefined)} /><Info label="Potência" value={parameter(`${radio}.TransmitPower`)} /><Info label="Ativo" value={enabled} /><Info label="Visível" value={booleanParameter(`${accessPoint}.SSIDAdvertisementEnabled`)} /><Info label="Isolar clientes" value={booleanParameter(`${accessPoint}.IsolationEnable`)} /></div></div> }
 function RouterConfigurationModal({ kind, router, parameter, onClose, onSaved }: { kind: Exclude<RouterTab, "general">; router: RouterDetailData; parameter: (...names: string[]) => string | undefined; onClose: () => void; onSaved: () => void }) {
   const band = kind === "wifi5" ? "5GHZ" : "2.4GHZ", index = kind === "wifi5" ? 2 : 1, current = router.wifi.find(item => item.band === band);
   const [ssid, setSSID] = useState(current?.ssid || parameter(`Device.WiFi.SSID.${index}.SSID`) || ""), [password, setPassword] = useState(""), [security, setSecurity] = useState(current?.security_mode || "WPA2_PSK"), [channelMode, setChannelMode] = useState(current?.channel_mode || "AUTO"), [channel, setChannel] = useState(current?.channel?.toString() || ""), [bandwidth, setBandwidth] = useState(current?.bandwidth_mhz?.toString() || ""), [enabled, setEnabled] = useState(current?.enabled ?? true);

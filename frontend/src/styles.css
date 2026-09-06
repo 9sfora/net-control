@@ -43,3 +43,102 @@ button { cursor: pointer; }
 @media (max-width:1050px) { .info-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media (max-width:760px) { .sidebar { transform:translateX(-100%); transition:transform .2s ease; box-shadow:10px 0 40px #0003; }.sidebar.open { transform:translateX(0); }.close-menu { display:grid !important; color:#9ca5b3; }.backdrop { position:fixed; inset:0; background:#10182788; z-index:15; }.content { margin-left:0; }.content > header { justify-content:space-between; padding:0 18px; }.content > header > div:first-of-type { display:grid; line-height:1.1; }.content > header > div:first-of-type span { font-size:13px; font-weight:700; }.content > header > div:first-of-type small { color:#8992a0; font-size:9px; }.menu-button { display:grid; }.header-status { display:none; }.page { padding:24px 17px 40px; }.page-title { align-items:center; }.page-title h1 { font-size:22px; }.page-title p { font-size:12px; }.page-actions { flex-wrap:wrap; justify-content:flex-end; }.stats { grid-template-columns:1fr; }.toolbar { align-items:stretch; flex-direction:column; }.toolbar select { width:100%; }.login-card { padding:31px 25px 25px; border-radius:14px; }.activity-row time { display:none; }.form-grid { grid-template-columns:1fr; gap:0; }.modal { max-height:calc(100vh - 20px); }.modal-backdrop { padding:10px; }.modal form, .modal-head { padding-left:18px; padding-right:18px; } }
 @media (max-width:760px) { .info-grid { grid-template-columns:1fr; }.detail-section { padding:15px; }.router-actions .button { flex:1 1 auto; } }
+
+/* Light control-center layout */
+:root { --blue:#155eef; --line:#dde5ef; --muted:#65758b; --sidebar:#fff; }
+body { background:radial-gradient(circle at 78% 0, #f3f8ff 0, transparent 34%), #f5f8fc; color:#111a31; }
+.sidebar { width:228px; padding:22px 17px 18px; color:#17223a; background:#fff; border-right:1px solid #e4eaf2; box-shadow:5px 0 20px rgba(36,66,110,.035); }
+.sidebar .login-brand { padding:0 9px 29px; color:#9aa4b4; font-size:22px; }
+.sidebar .brand-mark { display:none; }
+.sidebar nav { gap:5px; }
+.sidebar nav a { height:44px; padding:0 11px; color:#53627a; border-radius:9px; font-size:14px; }
+.sidebar nav a:hover { color:#155eef; background:#f4f7fc; }
+.sidebar nav a.active { color:#155eef; background:#edf4ff; box-shadow:inset 3px 0 #155eef; }
+.sidebar nav a svg { color:#7185a5; }
+.sidebar nav a.active svg { color:#155eef; }
+.account { color:#263650; border-top:1px solid #e8edf4; }
+.account span { color:#77869b; }
+.account button { color:#68809f; }
+.account button:hover { color:#155eef; }
+.avatar { background:#eaf0f8; color:#4b5d78; border-radius:50%; }
+.content { margin-left:228px; }
+.content > header { height:62px; padding:0 32px; gap:20px; background:rgba(250,252,255,.88); border:0; backdrop-filter:blur(12px); }
+.mobile-brand { display:none !important; }
+.global-search { margin-left:auto; width:302px; height:38px; padding:0 11px; display:flex; align-items:center; gap:10px; color:#7a89a1; background:#fff; border:1px solid #dce4ee; border-radius:9px; box-shadow:0 2px 7px rgba(31,65,116,.035); font-size:12px; }
+.global-search span { flex:1; }
+.global-search kbd { padding:3px 6px; color:#667995; background:#f2f5f9; border-radius:5px; font:10px inherit; }
+.header-notification { position:relative; width:34px; height:34px; display:grid; place-items:center; border:0; color:#60728e; background:transparent; }
+.header-notification i { position:absolute; top:5px; right:5px; width:7px; height:7px; border-radius:50%; background:#ef3340; box-shadow:0 0 0 2px #fff; }
+.header-avatar { width:38px; height:38px; display:grid; place-items:center; border-radius:50%; background:#e8eef7; color:#40516c; font-size:12px; font-weight:700; }
+.page { max-width:1440px; padding:7px 38px 54px; }
+.page-title { align-items:center; margin:0 0 20px; }
+.page-heading { display:flex; align-items:center; gap:14px; }
+.page-title h1 { font-size:30px; letter-spacing:-1px; }
+.page-title p { margin-top:4px; font-size:14px; }
+.operational-badge { display:inline-flex; align-items:center; gap:8px; padding:7px 14px; color:#15733c; background:#dcf8e7; border-radius:16px; font-size:12px; font-weight:600; white-space:nowrap; }
+.operational-badge i { width:9px; height:9px; border-radius:50%; background:#35bd5b; }
+.button, .action-select { height:42px; border-color:#d7e0eb; border-radius:8px; color:#24324a; background:#fff; box-shadow:0 1px 2px rgba(28,55,95,.02); }
+.button.primary { color:#fff; background:#155eef; border-color:#155eef; }
+.button.primary-outline { color:#155eef; border-color:#2d70ff; background:#fff; }
+.danger-button { color:#dc2539; border-color:#ffbbc3; background:#fff; }
+.pending-alert { min-height:74px; margin-bottom:20px; padding:14px 19px; display:grid; grid-template-columns:34px 1fr auto; align-items:center; gap:13px; color:#873915; background:#fff8ed; border:1px solid #ffc978; border-radius:10px; }
+.pending-alert-icon { color:#fff; width:33px; height:33px; display:grid; place-items:center; background:#f68a16; border-radius:7px; }
+.pending-alert strong { display:block; font-size:14px; }
+.pending-alert p { margin:4px 0 0; color:#6d7180; font-size:12px; }
+.pending-alert .button { color:#e76a00; border-color:#f5a23b; background:#fffaf4; }
+.detail-section { border-color:#dfe7f0; border-radius:11px; box-shadow:0 7px 25px rgba(43,77,120,.045); }
+.router-tab-card { padding:0 19px 19px; }
+.router-tab-card > .tabs { height:51px; margin:0 0 22px; padding:0; align-items:flex-end; gap:15px; }
+.router-tab-card > .tabs button { height:51px; padding:0 15px; border-bottom-width:2px; }
+.router-section-heading, .commands-header { margin-bottom:20px; display:flex; align-items:center; justify-content:space-between; gap:20px; }
+.section-title-copy { display:flex; align-items:center; gap:12px; }
+.section-icon { width:42px; height:42px; display:grid; place-items:center; color:#1264ef; background:#edf4ff; border-radius:8px; }
+.section-icon svg { width:21px; height:21px; }
+.section-title-copy h2 { margin:0; font-size:16px; }
+.section-title-copy p { margin:3px 0 0; color:#718097; font-size:12px; }
+.tab-actions { margin:0; gap:9px; }
+.combined-wifi { grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+.combined-wifi .info-grid:first-child, .combined-wifi .info-grid + .info-grid { margin-top:0; }
+.combined-wifi .info-grid::before { display:none; }
+.wifi-band-card { padding:16px; border:1px solid #dce5ef; border-radius:9px; background:#fff; }
+.wifi-band-title { height:32px; margin-bottom:10px; display:flex; align-items:center; gap:12px; color:#0966f2; }
+.wifi-band-title h3 { margin:0; color:#172037; font-size:16px; }
+.state-pill { margin-left:auto; padding:5px 12px; color:#a44141; background:#fff0f0; border-radius:14px; font-size:11px; font-weight:600; }
+.state-pill.active { color:#1b7b47; background:#dcf8e7; }
+.wifi-band-card .info-grid { grid-template-columns:repeat(2,minmax(0,1fr)); border:0; border-radius:0; background:#fff; }
+.wifi-band-card .info-item { min-height:40px; padding:9px 7px; display:grid; grid-template-columns:minmax(95px,.8fr) 1.2fr; align-items:center; gap:8px; border-bottom:1px solid #e7edf4; }
+.wifi-band-card .info-item:nth-last-child(-n+2) { border-bottom:0; }
+.wifi-band-card .info-item:nth-child(odd) { border-right:1px solid #e7edf4; }
+.wifi-band-card .info-item span { color:#73829a; font-size:10px; text-transform:none; }
+.wifi-band-card .info-item strong { color:#26344d; font-size:11px; }
+.commands-card { padding:17px 19px 13px; }
+.commands-header { margin-bottom:14px; }
+.commands-tools { display:flex; align-items:center; gap:9px; }
+.commands-tools label { width:220px; height:40px; padding:0 11px; display:flex; align-items:center; gap:8px; color:#7b8ba2; border:1px solid #d8e1ec; border-radius:8px; }
+.commands-tools input { width:100%; min-width:0; border:0; outline:0; color:#24324a; background:transparent; font-size:12px; }
+.commands-card .table-wrap { border-radius:8px; box-shadow:none; }
+.commands-card th { height:34px; }
+.commands-card td { padding-top:8px; padding-bottom:8px; }
+.table-summary { padding-top:13px; color:#6680a2; font-size:11px; }
+
+@media (max-width:1180px) {
+  .page-title { align-items:flex-start; flex-direction:column; }
+  .combined-wifi { grid-template-columns:1fr; }
+}
+@media (max-width:760px) {
+  .content { margin-left:0; }
+  .content > header { padding:0 14px; }
+  .mobile-brand { display:grid !important; }
+  .global-search, .header-notification, .header-avatar { display:none; }
+  .page { padding:20px 14px 40px; }
+  .page-heading { align-items:flex-start; flex-direction:column; gap:8px; }
+  .page-actions { justify-content:flex-start; }
+  .pending-alert { grid-template-columns:34px 1fr; }
+  .pending-alert .button { grid-column:1 / -1; width:100%; }
+  .router-section-heading, .commands-header { align-items:flex-start; flex-direction:column; }
+  .tab-actions, .commands-tools { width:100%; flex-wrap:wrap; }
+  .commands-tools label { flex:1 1 190px; }
+  .wifi-band-card .info-grid { grid-template-columns:1fr; }
+  .wifi-band-card .info-item:nth-child(odd) { border-right:0; }
+  .wifi-band-card .info-item:nth-last-child(2) { border-bottom:1px solid #e7edf4; }
+}

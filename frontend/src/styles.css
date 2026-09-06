@@ -101,6 +101,8 @@ body { background:radial-gradient(circle at 78% 0, #f3f8ff 0, transparent 34%), 
 .combined-wifi .info-grid:first-child, .combined-wifi .info-grid + .info-grid { margin-top:0; }
 .combined-wifi .info-grid::before { display:none; }
 .wifi-band-card { padding:16px; border:1px solid #dce5ef; border-radius:9px; background:#fff; }
+.steered-wifi .wifi-band-card { width:100%; }
+.steered-wifi .wifi-band-card .info-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
 .wifi-band-title { height:32px; margin-bottom:10px; display:flex; align-items:center; gap:12px; color:#0966f2; }
 .wifi-band-title h3 { margin:0; color:#172037; font-size:16px; }
 .state-pill { margin-left:auto; padding:5px 12px; color:#a44141; background:#fff0f0; border-radius:14px; font-size:11px; font-weight:600; }
